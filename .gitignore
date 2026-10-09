@@ -1,0 +1,11 @@
+node_modules/
+dist/
+target/
+src-tauri/binaries/
+.sonar/
+benchmark-results/
+*.log
+.tools/
+src-tauri/gen/
+*.tsbuildinfo
+__pycache__/
