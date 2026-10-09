@@ -1,5 +1,6 @@
 import type { ELK, ElkNode } from 'elkjs/lib/elk-api.js';
 import type { LayoutRequest, LayoutResult } from './contract';
+
 export async function calculateLayout(
   request: LayoutRequest,
   elk: Pick<ELK, 'layout'>,
@@ -17,12 +18,15 @@ export async function calculateLayout(
     ]),
   );
   const children: ElkNode[] = [];
+
   for (const node of request.nodes) {
     const parent = node.parentId ? nodes.get(node.parentId) : undefined;
     if (node.parentId && !parent) throw new Error('Missing layout parent');
+
     if (parent) parent.children!.push(nodes.get(node.id)!);
     else children.push(nodes.get(node.id)!);
   }
+
   const output = await elk.layout({
     id: 'root',
     layoutOptions: {
@@ -39,8 +43,8 @@ export async function calculateLayout(
       targets: [edge.target],
     })),
   });
-  const positions: LayoutResult['positions'] = {},
-    sizes: LayoutResult['sizes'] = {};
+  const positions: LayoutResult['positions'] = {};
+  const sizes: LayoutResult['sizes'] = {};
   const walk = (entries: ElkNode[]) => {
     for (const node of entries) {
       positions[node.id] = { x: node.x ?? 0, y: node.y ?? 0 };
@@ -49,6 +53,7 @@ export async function calculateLayout(
     }
   };
   walk(output.children ?? []);
+
   // Retain known positions only if their group dimensions did not change; children use parent-relative coordinates.
   for (const node of request.nodes) {
     if (
@@ -57,6 +62,7 @@ export async function calculateLayout(
       sizes[node.id].height !== node.height
     )
       continue;
+
     const candidate = node.position;
     const size = sizes[node.id];
     const parent = node.parentId ? sizes[node.parentId] : undefined;
@@ -68,10 +74,13 @@ export async function calculateLayout(
         candidate.y + size.height > parent.height - 20)
     )
       continue;
+
     const overlaps = request.nodes.some((other) => {
       if (other.id === node.id || other.parentId !== node.parentId) return false;
-      const at = positions[other.id],
-        bounds = sizes[other.id];
+
+      const at = positions[other.id];
+      const bounds = sizes[other.id];
+
       return (
         candidate.x < at.x + bounds.width + 12 &&
         candidate.x + size.width + 12 > at.x &&
@@ -81,5 +90,6 @@ export async function calculateLayout(
     });
     if (!overlaps) positions[node.id] = candidate;
   }
+
   return { positions, sizes };
 }

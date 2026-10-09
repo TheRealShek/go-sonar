@@ -1,4 +1,5 @@
 //! Offline graph indexing and bounded exploration for Go Sonar.
+
 mod analyzer;
 mod backend;
 mod model;
@@ -34,4 +35,5 @@ pub enum Error {
     State,
 }
 
+/// A result carrying a Go Sonar analysis, index, or exploration error.
 pub type Result<T> = std::result::Result<T, Error>;

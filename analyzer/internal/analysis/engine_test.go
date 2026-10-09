@@ -12,6 +12,7 @@ import (
 
 func write(t *testing.T, root, path, content string) {
 	t.Helper()
+
 	p := filepath.Join(root, path)
 	if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
 		t.Fatal(err)
@@ -28,10 +29,12 @@ type testEngine struct {
 
 func analyze(t *testing.T, e *testEngine, root string) Batch {
 	t.Helper()
+
 	b, err := e.Analyze(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if b.Full || e.facts == nil {
 		e.facts = map[string]Facts{}
 	}
@@ -41,14 +44,19 @@ func analyze(t *testing.T, e *testEngine, root string) Batch {
 	for _, facts := range b.Packages {
 		e.facts[facts.ID] = facts
 	}
+
 	return b
 }
+
 func fixture(t *testing.T) string {
 	t.Helper()
+
 	root := t.TempDir()
 	write(t, root, "go.mod", "module example.test/project\n\ngo 1.25.0\n")
+
 	write(t, root, "lib/lib.go", "package lib\ntype Item struct { Value int }\nfunc Change(v Item) Item { v.Value++; return v }\n")
 	write(t, root, "app/app.go", "package app\nimport \"example.test/project/lib\"\nfunc Run(v lib.Item) int { if v.Value > 0 { return lib.Change(v).Value }; v.Value = 2; return v.Value }\n")
+
 	return root
 }
 
@@ -56,12 +64,14 @@ func fixture(t *testing.T) string {
 func TestRelationships(t *testing.T) {
 	root := fixture(t)
 	write(t, root, "app/more.go", "package app\nimport \"example.test/project/lib\"\nfunc New() lib.Item { return lib.Item{Value:1} }\n")
+
 	b := analyze(t, &testEngine{}, root)
 	for _, diagnostic := range b.Diagnostics {
 		if diagnostic.Severity == "error" {
 			t.Fatal(b.Diagnostics)
 		}
 	}
+
 	kinds := map[string]bool{}
 	var branches, returns int
 	for _, p := range b.Packages {
@@ -87,6 +97,7 @@ func TestRelationships(t *testing.T) {
 			}
 		}
 	}
+
 	for _, kind := range []string{"calls", "uses_type", "reads", "writes", "constructs"} {
 		if !kinds[kind] {
 			t.Errorf("missing %s", kind)
@@ -105,33 +116,41 @@ func TestIncremental(t *testing.T) {
 	if !first.Full || first.Stats.AnalyzedPackages != 2 {
 		t.Fatal(first)
 	}
+
 	unchanged := analyze(t, e, root)
 	if unchanged.Full || unchanged.Stats.AnalyzedPackages != 0 || len(unchanged.Packages) != 0 || unchanged.Stats.ReusedPackages != 2 {
 		t.Fatal(unchanged)
 	}
+
 	write(t, root, "lib/lib.go", "package lib\ntype Item struct { Value int }\nfunc Change(v Item) Item { v.Value += 2; return v }\n")
 	body := analyze(t, e, root)
 	if body.Full || body.Stats.AnalyzedPackages != 1 || body.Stats.ReusedPackages != 1 {
 		t.Fatal(body)
 	}
 	checkClean(t, e, root)
+
 	write(t, root, "lib/lib.go", "package lib\ntype Item struct { Value int; Extra string }\nfunc Change(v Item) Item { v.Value += 2; return v }\n")
 	api := analyze(t, e, root)
 	if api.Stats.AnalyzedPackages != 2 {
 		t.Fatal(api)
 	}
 	checkClean(t, e, root)
+
 	if err := os.RemoveAll(filepath.Join(root, "app")); err != nil {
 		t.Fatal(err)
 	}
+
 	deleted := analyze(t, e, root)
 	if !reflect.DeepEqual(deleted.RemovedPackages, []string{"example.test/project/app"}) {
 		t.Fatal(deleted)
 	}
+
 	checkClean(t, e, root)
 }
+
 func checkClean(t *testing.T, e *testEngine, root string) {
 	t.Helper()
+
 	fresh := &testEngine{}
 	analyze(t, fresh, root)
 	for id, c := range fresh.facts {
@@ -139,10 +158,10 @@ func checkClean(t *testing.T, e *testEngine, root string) {
 		if !ok {
 			t.Fatalf("missing %s", id)
 		}
-		a, _ := json.Marshal(old)
-		b, _ := json.Marshal(c)
-		if string(a) != string(b) {
-			t.Fatalf("incremental facts differ for %s\n%s\n%s", id, a, b)
+		incremental, _ := json.Marshal(old)
+		clean, _ := json.Marshal(c)
+		if string(incremental) != string(clean) {
+			t.Fatalf("incremental facts differ for %s\n%s\n%s", id, incremental, clean)
 		}
 	}
 	if len(fresh.facts) != len(e.facts) {
@@ -155,6 +174,7 @@ func TestInvalidSource(t *testing.T) {
 	root := fixture(t)
 	e := &testEngine{}
 	analyze(t, e, root)
+
 	write(t, root, "app/app.go", "package app\nfunc Run( {\n")
 	broken := analyze(t, e, root)
 	if len(broken.Diagnostics) == 0 || len(broken.RemovedPackages) != 1 {
@@ -165,6 +185,7 @@ func TestInvalidSource(t *testing.T) {
 			t.Fatal("published invalid package")
 		}
 	}
+
 	write(t, root, "app/app.go", "package app\nfunc Run() int { return 1 }\n")
 	fixed := analyze(t, e, root)
 	for _, diagnostic := range fixed.Diagnostics {
@@ -172,6 +193,7 @@ func TestInvalidSource(t *testing.T) {
 			t.Fatal(fixed.Diagnostics)
 		}
 	}
+
 	checkClean(t, e, root)
 }
 
@@ -180,6 +202,7 @@ func TestStandardLibrary(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "go.mod", "module example.test/stdlib\n\ngo 1.26.0\n")
 	write(t, root, "main.go", "package stdlib\nimport \"errors\"\nfunc Failure() error { return errors.New(\"failure\") }\n")
+
 	batch := analyze(t, &testEngine{}, root)
 	for _, diagnostic := range batch.Diagnostics {
 		if diagnostic.Severity == "error" {
@@ -189,12 +212,14 @@ func TestStandardLibrary(t *testing.T) {
 	if len(batch.Packages) != 1 {
 		t.Fatal(batch)
 	}
+
 	found := false
 	for _, edge := range batch.Packages[0].Edges {
 		if edge.Kind == "calls" && edge.Target == "errors::New" {
 			found = true
 		}
 	}
+
 	if !found {
 		t.Fatal("missing resolved standard-library call")
 	}
@@ -205,27 +230,34 @@ func TestShortCircuitAndReturns(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "go.mod", "module example.test/branches\n\ngo 1.26.0\n")
 	write(t, root, "main.go", "package branches\nfunc First() bool{return true}\nfunc Second() bool{return false}\nfunc Run() bool{if First() && Second(){return true};return false}\n")
+
 	batch := analyze(t, &testEngine{}, root)
+
 	var behavior Behavior
 	for _, item := range batch.Packages[0].Behaviors {
 		if item.SymbolID == "example.test/branches::Run" {
 			behavior = item
 		}
 	}
+
 	nodes := map[string]Node{}
 	for _, node := range behavior.Nodes {
 		nodes[node.ID] = node
 	}
+
 	shortCircuit := false
 	for _, node := range behavior.Nodes {
 		if node.Kind == "condition" && node.Label == "First()" {
 			for _, edge := range behavior.Edges {
-				if edge.Source == node.ID && edge.Label == "true" && nodes[edge.Target].Kind == "call" && nodes[edge.Target].RelatedSymbolID == "example.test/branches::Second" {
+				target := nodes[edge.Target]
+				if edge.Source == node.ID && edge.Label == "true" &&
+					target.Kind == "call" && target.RelatedSymbolID == "example.test/branches::Second" {
 					shortCircuit = true
 				}
 			}
 		}
 	}
+
 	if !shortCircuit {
 		t.Fatal("missing conditional right-hand evaluation")
 	}
@@ -241,6 +273,7 @@ func TestConfigurationDeletion(t *testing.T) {
 	root := fixture(t)
 	e := &testEngine{}
 	analyze(t, e, root)
+
 	if err := os.RemoveAll(filepath.Join(root, "app")); err != nil {
 		t.Fatal(err)
 	}
@@ -249,6 +282,7 @@ func TestConfigurationDeletion(t *testing.T) {
 	if !reflect.DeepEqual(batch.RemovedPackages, []string{"example.test/project/app"}) {
 		t.Fatal(batch)
 	}
+
 	checkClean(t, e, root)
 }
 
@@ -257,7 +291,9 @@ func TestInterfaceMethodIdentity(t *testing.T) {
 	root := fixture(t)
 	write(t, root, "lib/interface.go", "package lib\ntype Reader interface { Read() int }\ntype Other interface { Read() string }\n")
 	write(t, root, "app/interface.go", "package app\nimport \"example.test/project/lib\"\nfunc Read(reader lib.Reader) int { return reader.Read() }\n")
+
 	b := analyze(t, &testEngine{}, root)
+
 	declared := map[string]bool{}
 	for _, p := range b.Packages {
 		if p.ID == "example.test/project/lib" {
@@ -268,9 +304,11 @@ func TestInterfaceMethodIdentity(t *testing.T) {
 			}
 		}
 	}
+
 	if len(declared) != 2 {
 		t.Fatalf("interface methods collided: %v", declared)
 	}
+
 	found := false
 	for _, p := range b.Packages {
 		if p.ID == "example.test/project/app" {
@@ -287,6 +325,7 @@ func TestInterfaceMethodIdentity(t *testing.T) {
 			}
 		}
 	}
+
 	if !found {
 		t.Fatal("interface call missing")
 	}
@@ -295,6 +334,7 @@ func TestInterfaceMethodIdentity(t *testing.T) {
 // TestSourceFingerprints verifies source hashes describe exactly the published source files.
 func TestSourceFingerprints(t *testing.T) {
 	root := fixture(t)
+
 	b := analyze(t, &testEngine{}, root)
 	for _, p := range b.Packages {
 		if len(p.SourceFingerprints) != len(p.Files) {
@@ -316,7 +356,9 @@ func TestSourceFingerprints(t *testing.T) {
 func TestIndirectLocalCalls(t *testing.T) {
 	root := fixture(t)
 	write(t, root, "app/indirect.go", "package app\nfunc A(fn func()) { fn() }\nfunc B(fn func()) { fn() }\nfunc Direct() {}\nfunc C() { Direct() }\n")
+
 	b := analyze(t, &testEngine{}, root)
+
 	var indirect, direct int
 	for _, p := range b.Packages {
 		for _, s := range p.Symbols {
@@ -341,6 +383,7 @@ func TestIndirectLocalCalls(t *testing.T) {
 			}
 		}
 	}
+
 	if indirect != 2 || direct != 1 {
 		t.Fatalf("calls: indirect=%d direct=%d", indirect, direct)
 	}
@@ -360,6 +403,7 @@ func TestPublicationRejectsChangedInputs(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+
 			switch change {
 			case "edit":
 				write(t, root, "app/app.go", "package app\nfunc Different() {}\n")
@@ -372,6 +416,7 @@ func TestPublicationRejectsChangedInputs(t *testing.T) {
 			case "config":
 				write(t, root, "go.mod", "module example.test/project\n\ngo 1.26.0\n")
 			}
+
 			published, err := e.publish(context.Background(), input, initial)
 			if err == nil || !strings.Contains(err.Error(), "retry analysis") {
 				t.Fatalf("expected explicit retry error, got %v", err)
@@ -379,6 +424,7 @@ func TestPublicationRejectsChangedInputs(t *testing.T) {
 			if published.Snapshot != "" || len(published.Packages) != 0 {
 				t.Fatal("published mismatched snapshot")
 			}
+
 			retry, err := e.Analyze(context.Background(), root)
 			if err != nil {
 				t.Fatal(err)
@@ -397,6 +443,7 @@ func TestSnapshotSourceReadRejectsTransientEdit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	write(t, root, "app/app.go", "package app\nfunc Changed() {}\n")
 	if _, err := input.readSource(filepath.Join(root, "app/app.go")); err == nil {
 		t.Fatal("accepted changed source during analysis")
@@ -414,6 +461,7 @@ func TestExplicitWorkspaceFingerprint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	write(t, outside, "go.work", "go 1.26.0\n// changed workspace configuration\n")
 	changed, err := scanInputs(context.Background(), root)
 	if err != nil {
@@ -422,6 +470,7 @@ func TestExplicitWorkspaceFingerprint(t *testing.T) {
 	if original.config == changed.config {
 		t.Fatal("explicit external workspace contents were not fingerprinted")
 	}
+
 	write(t, outside, "go.work.sum", "module.example v1.0.0 h1:example\n")
 	withSum, err := scanInputs(context.Background(), root)
 	if err != nil {
@@ -430,6 +479,7 @@ func TestExplicitWorkspaceFingerprint(t *testing.T) {
 	if withSum.config == changed.config {
 		t.Fatal("explicit workspace sum contents were not fingerprinted")
 	}
+
 	if !reflect.DeepEqual(original.files, withSum.files) {
 		t.Fatal("workspace configuration polluted selected source set")
 	}

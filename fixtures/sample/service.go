@@ -19,5 +19,6 @@ func (s *Service) Get(key string) (store.Record, error) {
 	}
 	record = store.Normalize(record)
 	s.Cache[key] = record
+
 	return record, nil
 }

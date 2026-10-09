@@ -62,6 +62,7 @@ impl GraphStore {
              CREATE TABLE IF NOT EXISTS behaviors(symbol_id TEXT PRIMARY KEY,
                package_id TEXT NOT NULL, body TEXT NOT NULL);",
         )?;
+
         let root = root.to_string_lossy().into_owned();
         let existing: Option<String> = connection
             .query_row("SELECT value FROM metadata WHERE key='root'", [], |r| {
@@ -71,7 +72,9 @@ impl GraphStore {
         if existing.as_ref().is_some_and(|r| r != &root) {
             return Err(Error::Invalid("cache belongs to another project".into()));
         }
+
         connection.execute("INSERT OR IGNORE INTO metadata VALUES ('root',?1)", [&root])?;
+
         Ok(Self { connection, root })
     }
 
@@ -81,11 +84,20 @@ impl GraphStore {
             return Err(Error::Invalid("analyzer root or snapshot mismatch".into()));
         }
         validate_batch(batch)?;
+
         let tx = self.connection.transaction()?;
         if batch.full {
-            tx.execute_batch("DELETE FROM symbol_owners; DELETE FROM relation_owners;
-                DELETE FROM behaviors; DELETE FROM sources; DELETE FROM packages; DELETE FROM symbols; DELETE FROM relations;")?;
+            tx.execute_batch(
+                "DELETE FROM symbol_owners;
+                 DELETE FROM relation_owners;
+                 DELETE FROM behaviors;
+                 DELETE FROM sources;
+                 DELETE FROM packages;
+                 DELETE FROM symbols;
+                 DELETE FROM relations;",
+            )?;
         }
+
         for id in batch
             .removed_packages
             .iter()
@@ -98,6 +110,7 @@ impl GraphStore {
             tx.execute("DELETE FROM packages WHERE id=?1", [id])?;
             tx.execute("DELETE FROM sources WHERE package_id=?1", [id])?;
         }
+
         for package in &batch.packages {
             for (path, fingerprint) in &package.source_fingerprints {
                 tx.execute(
@@ -105,10 +118,12 @@ impl GraphStore {
                     params![package.id, path, fingerprint],
                 )?;
             }
+
             tx.execute(
                 "INSERT INTO packages VALUES (?1,?2)",
                 params![package.id, package.fingerprint],
             )?;
+
             for symbol in &package.symbols {
                 let local = Path::new(&symbol.source.file).starts_with(&self.root);
                 // The declaring package supplies canonical docs and source. Consumers may
@@ -135,6 +150,7 @@ impl GraphStore {
                     params![package.id, symbol.id],
                 )?;
             }
+
             for relation in &package.edges {
                 tx.execute(
                     "INSERT INTO relations VALUES (?1,?2,?3,?4,?5)
@@ -153,6 +169,7 @@ impl GraphStore {
                     params![package.id, relation.id],
                 )?;
             }
+
             for behavior in &package.behaviors {
                 tx.execute(
                     "INSERT OR REPLACE INTO behaviors VALUES (?1,?2,?3)",
@@ -164,6 +181,7 @@ impl GraphStore {
                 )?;
             }
         }
+
         tx.execute(
             "DELETE FROM symbols WHERE NOT EXISTS
             (SELECT 1 FROM symbol_owners WHERE symbol_id=symbols.id)",
@@ -174,6 +192,7 @@ impl GraphStore {
             (SELECT 1 FROM relation_owners WHERE relation_id=relations.id)",
             [],
         )?;
+
         let dangling: usize = tx.query_row(
             "SELECT COUNT(*) FROM relations r
             WHERE NOT EXISTS(SELECT 1 FROM symbols WHERE id=r.source)
@@ -186,27 +205,32 @@ impl GraphStore {
                 "analyzer supplied {dangling} dangling relationships"
             )));
         }
+
         tx.execute(
             "INSERT OR REPLACE INTO metadata VALUES ('snapshot',?1)",
             [&batch.snapshot],
         )?;
         tx.commit()?;
+
+        let name = Path::new(&self.root).file_name().map_or_else(
+            || self.root.clone(),
+            |name| name.to_string_lossy().into_owned(),
+        );
+        let symbol_count = self.connection.query_row(
+            "SELECT COUNT(*) FROM symbols WHERE local=1",
+            [],
+            read_count,
+        )?;
+        let relation_count =
+            self.connection
+                .query_row("SELECT COUNT(*) FROM relations", [], read_count)?;
+
         Ok(ProjectSummary {
             root: self.root.clone(),
-            name: Path::new(&self.root)
-                .file_name()
-                .map_or_else(|| self.root.clone(), |n| n.to_string_lossy().into_owned()),
+            name,
             snapshot: batch.snapshot.clone(),
-            symbol_count: self.connection.query_row(
-                "SELECT COUNT(*) FROM symbols WHERE local=1",
-                [],
-                read_count,
-            )?,
-            relation_count: self.connection.query_row(
-                "SELECT COUNT(*) FROM relations",
-                [],
-                read_count,
-            )?,
+            symbol_count,
+            relation_count,
             stats: batch.stats.clone(),
             diagnostics: batch.diagnostics.clone(),
         })
@@ -217,11 +241,13 @@ impl GraphStore {
         if query.len() > 512 {
             return Err(Error::Invalid("search exceeds 512 bytes".into()));
         }
+
         let escaped = query
             .replace('\\', "\\\\")
             .replace('%', "\\%")
             .replace('_', "\\_");
         let pattern = format!("%{escaped}%");
+
         let mut statement = self.connection.prepare(
             "SELECT body FROM symbols WHERE local=1
             AND (name LIKE ?1 ESCAPE '\\' OR qualified_name LIKE ?1 ESCAPE '\\')
@@ -231,7 +257,12 @@ impl GraphStore {
             .query_map(params![pattern, query, limit.clamp(1, 100) as i64], |r| {
                 r.get::<_, String>(0)
             })?;
-        rows.map(|r| Ok(serde_json::from_str(&r?)?)).collect()
+
+        rows.map(|row| {
+            let body = row?;
+            Ok(serde_json::from_str(&body)?)
+        })
+        .collect()
     }
 
     fn symbol(&self, id: &str) -> Result<Symbol> {
@@ -239,7 +270,9 @@ impl GraphStore {
             .connection
             .query_row("SELECT body FROM symbols WHERE id=?1", [id], |r| r.get(0))
             .optional()?;
-        serde_json::from_str(&body.ok_or_else(|| Error::NotFound(id.into()))?).map_err(Into::into)
+        let body = body.ok_or_else(|| Error::NotFound(id.into()))?;
+
+        serde_json::from_str(&body).map_err(Into::into)
     }
 
     /// Expected source bytes for the published analysis, never the current disk state.
@@ -280,6 +313,7 @@ impl GraphStore {
             Direction::Outgoing => "source=?1",
             Direction::Both => "(source=?1 OR target=?1)",
         };
+
         // Kinds were validated against fixed identifiers, never arbitrary SQL input.
         let filters = kinds
             .iter()
@@ -295,7 +329,12 @@ impl GraphStore {
         let rows = stmt.query_map(params![id, limit as i64, offset as i64], |r| {
             r.get::<_, String>(0)
         })?;
-        rows.map(|r| Ok(serde_json::from_str(&r?)?)).collect()
+
+        rows.map(|row| {
+            let body = row?;
+            Ok(serde_json::from_str(&body)?)
+        })
+        .collect()
     }
 
     /// Disclose focus neighbors and only the further levels explicitly requested.
@@ -310,10 +349,12 @@ impl GraphStore {
                 "expansion request exceeds its bounds".into(),
             ));
         }
+
         let kinds = &request.kinds;
         if kinds.len() > KINDS.len() || kinds.iter().any(|k| !KINDS.contains(&k.as_str())) {
             return Err(Error::Invalid("unknown relationship kind".into()));
         }
+
         let limit = request.limit.clamp(1, MAX_NODES);
         let mut view = GraphView {
             snapshot: self.snapshot()?,
@@ -324,6 +365,7 @@ impl GraphStore {
             truncated: false,
         };
         let expanded: HashSet<_> = request.expanded.iter().map(String::as_str).collect();
+
         // Explicitly opened focus behavior gets space before external fan-out.
         self.add_internals(request, limit, &mut view)?;
         let mut visited = HashSet::from([request.focus.clone()]);
@@ -331,13 +373,16 @@ impl GraphStore {
         let mut queue = VecDeque::from([request.focus.clone()]);
         let mut processed = HashSet::new();
         let mut pages = std::collections::HashMap::new();
+
         while let Some(id) = queue.pop_front() {
             if !processed.insert(id.clone()) {
                 continue;
             }
+
             let offset = request.offsets.get(&id).copied().unwrap_or(0);
             let adjacent = self.adjacent(&id, request.direction, kinds, PAGE_SIZE + 1, offset)?;
             pages.insert(id.clone(), (offset, adjacent.len() > PAGE_SIZE));
+
             for edge in adjacent.into_iter().take(PAGE_SIZE) {
                 if edge_ids.contains(&edge.id) {
                     continue;
@@ -346,11 +391,13 @@ impl GraphStore {
                     view.truncated = true;
                     break;
                 }
+
                 let other = if edge.source == id {
                     &edge.target
                 } else {
                     &edge.source
                 };
+
                 if !visited.contains(other) {
                     if view.nodes.len() == limit {
                         view.truncated = true;
@@ -359,19 +406,24 @@ impl GraphStore {
                     view.nodes.push(self.symbol(other)?.into());
                     visited.insert(other.clone());
                 }
+
                 if expanded.contains(other.as_str()) {
                     queue.push_back(other.clone());
                 }
+
                 edge_ids.insert(edge.id.clone());
                 view.edges.push(edge);
             }
         }
+
         self.add_internals(request, limit, &mut view)?;
         let visible_ids: HashSet<_> = view.nodes.iter().map(|n| n.id.as_str()).collect();
+
         for node in view.nodes.iter().filter(|n| n.parent_id.is_some()) {
             let Some(target) = node.related_symbol_id.as_deref() else {
                 continue;
             };
+
             if !visible_ids.contains(target) {
                 continue;
             }
@@ -389,6 +441,7 @@ impl GraphStore {
                 view.truncated = true;
                 break;
             }
+
             let mut relation = relation.clone();
             relation.id = format!("{}/call-target", node.id);
             relation.source = node.id.clone();
@@ -396,6 +449,7 @@ impl GraphStore {
             relation.evidence = node.source.clone();
             view.edges.push(relation);
         }
+
         for node in view.nodes.iter().filter(|n| n.parent_id.is_none()) {
             let incoming = self.degree(&node.id, "target")?;
             let outgoing = self.degree(&node.id, "source")?;
@@ -411,6 +465,7 @@ impl GraphStore {
                 .filter(|e| e.source == node.id || e.target == node.id)
                 .filter(|e| edge_ids.contains(&e.id))
                 .count();
+
             view.summaries.push(GraphSummary {
                 node_id: node.id.clone(),
                 incoming,
@@ -421,6 +476,7 @@ impl GraphStore {
                 has_more: pages.get(&node.id).map(|p| p.1),
             });
         }
+
         Ok(view)
     }
 
@@ -445,10 +501,12 @@ impl GraphStore {
             .iter()
             .filter_map(|n| n.parent_id.clone())
             .collect();
+
         for id in &request.internals {
             if !opened.insert(id.clone()) {
                 continue;
             }
+
             let Some(parent) = view
                 .nodes
                 .iter()
@@ -457,6 +515,7 @@ impl GraphStore {
                 continue;
             };
             let package_id = parent.package_id.clone();
+
             let body: Option<String> = self
                 .connection
                 .query_row("SELECT body FROM behaviors WHERE symbol_id=?1", [id], |r| {
@@ -466,13 +525,16 @@ impl GraphStore {
             let Some(body) = body else {
                 continue;
             };
+
             let behavior: Behavior = serde_json::from_str(&body)?;
             let mut added = std::collections::HashMap::new();
+
             for node in behavior.nodes {
                 if view.nodes.len() == limit {
                     view.truncated = true;
                     break;
                 }
+
                 added.insert(node.id.clone(), node.source.clone());
                 view.nodes.push(ViewNode {
                     id: node.id,
@@ -489,6 +551,7 @@ impl GraphStore {
                     related_symbol_id: node.related_symbol_id,
                 });
             }
+
             for edge in behavior.edges {
                 if !added.contains_key(&edge.target) {
                     continue;
@@ -500,6 +563,7 @@ impl GraphStore {
                     view.truncated = true;
                     break;
                 }
+
                 view.edges.push(Relation {
                     id: edge.id,
                     source: edge.source,
@@ -511,6 +575,7 @@ impl GraphStore {
                 });
             }
         }
+
         Ok(())
     }
 
@@ -528,6 +593,7 @@ impl GraphStore {
             "behavior" => &["calls", "reads", "references"],
             _ => return Err(Error::Invalid("unknown change category".into())),
         };
+
         let mut view = self.graph(&GraphRequest {
             focus: symbol_id.into(),
             expanded: vec![],
@@ -537,6 +603,7 @@ impl GraphStore {
             direction: Direction::Incoming,
             offsets: Default::default(),
         })?;
+
         for edge in &mut view.edges {
             edge.label = format!(
                 "Potential {category} impact: {}. Check this source use; breakage is not proven.",
@@ -544,6 +611,7 @@ impl GraphStore {
             );
             edge.certainty = "possible".into();
         }
+
         Ok(view)
     }
 }
@@ -565,6 +633,7 @@ fn validate_batch(batch: &AnalysisBatch) -> Result<()> {
         if symbols.len() != package.symbols.len() || symbols.contains("") {
             return Err(Error::Invalid("duplicate or empty symbol identity".into()));
         }
+
         for relation in &package.edges {
             if !KINDS.contains(&relation.kind.as_str())
                 || !["resolved", "possible"].contains(&relation.certainty.as_str())
@@ -574,14 +643,17 @@ fn validate_batch(batch: &AnalysisBatch) -> Result<()> {
                 ));
             }
         }
+
         for behavior in &package.behaviors {
             if !symbols.contains(behavior.symbol_id.as_str()) {
                 return Err(Error::Invalid("behavior has no declaring symbol".into()));
             }
+
             let nodes: HashSet<_> = behavior.nodes.iter().map(|n| n.id.as_str()).collect();
             if nodes.len() != behavior.nodes.len() || nodes.iter().any(|id| symbols.contains(id)) {
                 return Err(Error::Invalid("duplicate behavior identity".into()));
             }
+
             let edges: HashSet<_> = behavior.edges.iter().map(|e| e.id.as_str()).collect();
             if edges.len() != behavior.edges.len()
                 || behavior.edges.iter().any(|e| {
@@ -594,5 +666,6 @@ fn validate_batch(batch: &AnalysisBatch) -> Result<()> {
             }
         }
     }
+
     Ok(())
 }

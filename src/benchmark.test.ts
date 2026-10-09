@@ -1,9 +1,11 @@
 import { expect, it } from 'vitest';
 import { afterCommittedFrames, runBenchmark, type BenchmarkReport } from './benchmark';
 import { sampleBackend } from './sample';
+
 it('waits two committed frames and rejects stale publication at a frame boundary', async () => {
   const frames: FrameRequestCallback[] = [];
   let active = true;
+
   const pending = afterCommittedFrames(
     () => active,
     (callback) => {
@@ -11,13 +13,16 @@ it('waits two committed frames and rejects stale publication at a frame boundary
       return frames.length;
     },
   );
+
   expect(frames).toHaveLength(1);
   frames.shift()!(0);
   await Promise.resolve();
   expect(frames).toHaveLength(1);
+
   active = false;
   frames.shift()!(1);
   await expect(pending).rejects.toThrow('superseded');
+
   const successful: number[] = [];
   await afterCommittedFrames(
     () => true,
@@ -29,9 +34,11 @@ it('waits two committed frames and rejects stale publication at a frame boundary
   );
   expect(successful).toHaveLength(2);
 });
+
 it('reports bounded renders only after presentation completes and closes with complete', async () => {
   const reports: BenchmarkReport[] = [];
   let rendered = 0;
+
   await runBenchmark(
     { root: '/sample', query: 'Get', iterations: 2 },
     {
@@ -54,6 +61,7 @@ it('reports bounded renders only after presentation completes and closes with co
       },
     },
   );
+
   expect(reports.map((report) => report.phase)).toEqual([
     'indexed',
     'search',
@@ -72,10 +80,12 @@ it('reports bounded renders only after presentation completes and closes with co
     reports.filter((report) => report.nodes !== undefined).every((report) => report.nodes! <= 80),
   ).toBe(true);
 });
+
 it('does not publish render or completion after superseded backend work', async () => {
   let active = true;
   let publications = 0;
   const reports: BenchmarkReport[] = [];
+
   await runBenchmark(
     { root: '/sample', query: 'Get', iterations: 1 },
     {
@@ -97,11 +107,14 @@ it('does not publish render or completion after superseded backend work', async 
       },
     },
   );
+
   expect(publications).toBe(0);
   expect(reports.some((report) => report.phase === 'complete')).toBe(false);
 });
+
 it('reports a changed analysis snapshot as failure instead of fresh rendered facts', async () => {
   const reports: BenchmarkReport[] = [];
+
   await runBenchmark(
     { root: '/sample', query: 'Get', iterations: 1 },
     {
@@ -119,12 +132,15 @@ it('reports a changed analysis snapshot as failure instead of fresh rendered fac
       },
     },
   );
+
   expect(reports.at(-1)?.phase).toBe('failure');
   expect(reports.at(-1)?.message).toContain('snapshot changed');
 });
+
 it('forwards explicit background commit presentation to each bounded view', async () => {
   const modes: unknown[] = [];
   const reports: BenchmarkReport[] = [];
+
   await runBenchmark(
     { root: '/sample', query: 'Get', iterations: 1, presentation: 'commit' },
     {
@@ -149,6 +165,7 @@ it('forwards explicit background commit presentation to each bounded view', asyn
       },
     },
   );
+
   expect(modes.length).toBeGreaterThan(0);
   expect(modes.every((mode) => mode === 'commit')).toBe(true);
   expect(reports.at(-1)).toMatchObject({

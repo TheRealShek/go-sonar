@@ -5,19 +5,56 @@ use serde_json::json;
 use sonar_core::{AnalysisBatch, Direction, GraphRequest, GraphStore, PackageFacts};
 
 fn package(root: &Path, id: &str, names: &[&str], connections: &[(&str, &str)]) -> PackageFacts {
+    let source = json!({
+        "file": root.join("main.go"),
+        "line": 1,
+        "column": 1,
+        "endLine": 1,
+        "endColumn": 2,
+    });
+    let symbols: Vec<_> = names
+        .iter()
+        .map(|name| {
+            json!({
+                "id": name,
+                "name": name,
+                "qualifiedName": name,
+                "kind": "function",
+                "packageId": id,
+                "source": source,
+                "signature": "func()",
+                "documentation": "test",
+                "exported": true,
+            })
+        })
+        .collect();
+    let edges: Vec<_> = connections
+        .iter()
+        .map(|(from, to)| {
+            json!({
+                "id": format!("{from}:{to}"),
+                "source": from,
+                "target": to,
+                "kind": "calls",
+                "label": "calls",
+                "certainty": "resolved",
+                "evidence": source,
+            })
+        })
+        .collect();
+
     serde_json::from_value(json!({
-        "id": id, "fingerprint": "test", "files": [], "imports": [],
-        "symbols": names.iter().map(|name| json!({
-            "id": name, "name": name, "qualifiedName": name, "kind": "function",
-            "packageId": id, "source": {"file":root.join("main.go"),"line":1,"column":1,"endLine":1,"endColumn":2},
-            "signature":"func()", "documentation":"test", "exported":true
-        })).collect::<Vec<_>>(),
-        "edges": connections.iter().map(|(from,to)| json!({
-            "id": format!("{from}:{to}"), "source":from,"target":to,"kind":"calls",
-            "label":"calls", "certainty":"resolved", "evidence":{"file":root.join("main.go"),"line":1,"column":1,"endLine":1,"endColumn":2}
-        })).collect::<Vec<_>>(), "behaviors": []
-    })).unwrap()
+        "id": id,
+        "fingerprint": "test",
+        "files": [],
+        "imports": [],
+        "symbols": symbols,
+        "edges": edges,
+        "behaviors": [],
+    }))
+    .unwrap()
 }
+
 fn batch(root: &Path, packages: Vec<PackageFacts>, full: bool) -> AnalysisBatch {
     AnalysisBatch {
         root: root.to_string_lossy().into(),
@@ -29,6 +66,7 @@ fn batch(root: &Path, packages: Vec<PackageFacts>, full: bool) -> AnalysisBatch 
         diagnostics: vec![],
     }
 }
+
 fn request(focus: &str, expanded: &[&str], limit: usize, direction: Direction) -> GraphRequest {
     GraphRequest {
         focus: focus.into(),
@@ -40,13 +78,16 @@ fn request(focus: &str, expanded: &[&str], limit: usize, direction: Direction) -
         offsets: Default::default(),
     }
 }
+
 fn valid_endpoints(view: &sonar_core::GraphView) {
     let ids: HashSet<_> = view.nodes.iter().map(|n| n.id.as_str()).collect();
     assert_eq!(ids.len(), view.nodes.len(), "duplicate nodes");
+
     for edge in &view.edges {
         assert!(ids.contains(edge.source.as_str()));
         assert!(ids.contains(edge.target.as_str()));
     }
+
     let edges: HashSet<_> = view.edges.iter().map(|e| e.id.as_str()).collect();
     assert_eq!(edges.len(), view.edges.len());
 }
@@ -75,12 +116,14 @@ fn bounded_directional_expansion_preserves_cycles_and_shared_nodes() {
             true,
         ))
         .unwrap();
+
     let initial = store
         .graph(&request("a", &[], 20, Direction::Outgoing))
         .unwrap();
     assert_eq!(initial.nodes.len(), 3);
     assert_eq!(initial.edges.len(), 2);
     valid_endpoints(&initial);
+
     let expanded = store
         .graph(&request(
             "a",
@@ -92,11 +135,13 @@ fn bounded_directional_expansion_preserves_cycles_and_shared_nodes() {
     assert_eq!(expanded.nodes.len(), 4);
     assert_eq!(expanded.edges.len(), 5);
     valid_endpoints(&expanded);
+
     let incoming = store
         .graph(&request("a", &[], 20, Direction::Incoming))
         .unwrap();
     assert!(incoming.edges.iter().all(|e| e.target == "a"));
     assert_eq!(incoming.nodes.len(), 3);
+
     let bounded = store
         .graph(&request("a", &["b", "c", "shared"], 2, Direction::Both))
         .unwrap();
@@ -113,22 +158,30 @@ fn replacement_and_deletion_preserve_shared_external_ownership() {
     let mut store = GraphStore::memory(root).unwrap();
     let mut first = package(root, "p", &["a", "external"], &[("a", "external")]);
     let mut second = package(root, "q", &["b", "external"], &[("b", "external")]);
-    for p in [&mut first, &mut second] {
-        let external = p.symbols.iter_mut().find(|s| s.id == "external").unwrap();
+    for owner in [&mut first, &mut second] {
+        let external = owner
+            .symbols
+            .iter_mut()
+            .find(|s| s.id == "external")
+            .unwrap();
         external.package_id = "std".into();
         external.source = Default::default();
     }
+
     store
         .apply(&batch(root, vec![first, second], true))
         .unwrap();
+
     let update = batch(root, vec![package(root, "p", &["new"], &[])], false);
     store.apply(&update).unwrap();
     assert!(store.graph(&request("a", &[], 5, Direction::Both)).is_err());
+
     let remaining = store
         .graph(&request("b", &[], 5, Direction::Outgoing))
         .unwrap();
     assert_eq!(remaining.nodes.len(), 2);
     valid_endpoints(&remaining);
+
     let mut removed = batch(root, vec![], false);
     removed.removed_packages = vec!["q".into()];
     store.apply(&removed).unwrap();
@@ -144,6 +197,7 @@ fn full_batch_clears_stale_packages_across_sessions() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     let database = root.join("cache.sqlite");
+
     {
         let mut store = GraphStore::open(&database, root).unwrap();
         store
@@ -154,8 +208,10 @@ fn full_batch_clears_stale_packages_across_sessions() {
             ))
             .unwrap();
     }
+
     let mut store = GraphStore::open(&database, root).unwrap();
     assert_eq!(store.search("stale", 10).unwrap().len(), 1);
+
     store
         .apply(&batch(
             root,
@@ -179,6 +235,7 @@ fn dangling_replacement_rolls_back_symbols_and_snapshot() {
             true,
         ))
         .unwrap();
+
     let mut invalid = batch(
         root,
         vec![package(root, "p", &["a"], &[("a", "missing")])],
@@ -186,6 +243,7 @@ fn dangling_replacement_rolls_back_symbols_and_snapshot() {
     );
     invalid.snapshot = "invalid".into();
     assert!(store.apply(&invalid).is_err());
+
     let view = store
         .graph(&request("a", &[], 10, Direction::Outgoing))
         .unwrap();
@@ -199,13 +257,43 @@ fn internals_are_grouped_and_keep_valid_endpoints_under_limits() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     let mut store = GraphStore::memory(root).unwrap();
-    let mut p = package(root, "p", &["a"], &[]);
-    p.behaviors=serde_json::from_value(json!([{"symbolId":"a","nodes":[
-        {"id":"entry","kind":"entry","label":"entry","source":{"file":root.join("main.go"),"line":1,"column":1,"endLine":1,"endColumn":2}},
-        {"id":"return","kind":"return","label":"return","source":{"file":root.join("main.go"),"line":1,"column":1,"endLine":1,"endColumn":2}},
-        {"id":"exit","kind":"exit","label":"exit","source":{"file":root.join("main.go"),"line":1,"column":1,"endLine":1,"endColumn":2}}],
-        "edges":[{"id":"first","source":"entry","target":"return","kind":"control","label":""},{"id":"last","source":"return","target":"exit","kind":"control","label":""}]}])).unwrap();
-    store.apply(&batch(root, vec![p], true)).unwrap();
+    let mut function_package = package(root, "p", &["a"], &[]);
+    let source = json!({
+        "file": root.join("main.go"),
+        "line": 1,
+        "column": 1,
+        "endLine": 1,
+        "endColumn": 2,
+    });
+    function_package.behaviors = serde_json::from_value(json!([{
+        "symbolId": "a",
+        "nodes": [
+            {"id": "entry", "kind": "entry", "label": "entry", "source": source},
+            {"id": "return", "kind": "return", "label": "return", "source": source},
+            {"id": "exit", "kind": "exit", "label": "exit", "source": source},
+        ],
+        "edges": [
+            {
+                "id": "first",
+                "source": "entry",
+                "target": "return",
+                "kind": "control",
+                "label": "",
+            },
+            {
+                "id": "last",
+                "source": "return",
+                "target": "exit",
+                "kind": "control",
+                "label": "",
+            },
+        ],
+    }]))
+    .unwrap();
+    store
+        .apply(&batch(root, vec![function_package], true))
+        .unwrap();
+
     let mut req = request("a", &[], 20, Direction::Both);
     req.internals = vec!["a".into()];
     let complete = store.graph(&req).unwrap();
@@ -219,11 +307,13 @@ fn internals_are_grouped_and_keep_valid_endpoints_under_limits() {
             .filter(|n| n.id != "a")
             .all(|n| n.parent_id.as_deref() == Some("a"))
     );
+
     req.internals = vec!["a".into(), "a".into()];
     let duplicate_request = store.graph(&req).unwrap();
     assert_eq!(duplicate_request.nodes.len(), 4);
     assert_eq!(duplicate_request.edges.len(), 2);
     valid_endpoints(&duplicate_request);
+
     req.limit = 3;
     let limited = store.graph(&req).unwrap();
     assert!(limited.truncated);
@@ -239,6 +329,7 @@ fn unknown_relationship_filters_are_rejected() {
     store
         .apply(&batch(root, vec![package(root, "p", &["a"], &[])], true))
         .unwrap();
+
     let mut req = request("a", &[], 10, Direction::Both);
     req.kinds = vec!["calls'); DROP TABLE symbols; --".into()];
     assert!(store.graph(&req).is_err());
@@ -266,6 +357,7 @@ fn large_neighborhoods_can_be_paged_without_hydrating_all_neighbors() {
             true,
         ))
         .unwrap();
+
     let mut req = request("focus", &[], 80, Direction::Outgoing);
     let first = store.graph(&req).unwrap();
     assert_eq!(first.nodes.len(), 41);
@@ -278,6 +370,7 @@ fn large_neighborhoods_can_be_paged_without_hydrating_all_neighbors() {
     assert_eq!(summary.hidden, 20);
     assert_eq!(summary.has_more, Some(true));
     assert_eq!(summary.page_size, Some(40));
+
     req.offsets.insert("focus".into(), 40);
     let second = store.graph(&req).unwrap();
     assert_eq!(second.nodes.len(), 21);
@@ -291,6 +384,7 @@ fn large_neighborhoods_can_be_paged_without_hydrating_all_neighbors() {
             .has_more,
         Some(false)
     );
+
     let ids: HashSet<_> = first
         .edges
         .iter()
@@ -300,6 +394,7 @@ fn large_neighborhoods_can_be_paged_without_hydrating_all_neighbors() {
     assert_eq!(ids.len(), 60);
     valid_endpoints(&first);
     valid_endpoints(&second);
+
     req.offsets.insert("focus".into(), 1_000_001);
     assert!(store.graph(&req).is_err());
 }
@@ -321,6 +416,7 @@ fn empty_relationship_filters_hide_all_external_edges() {
             true,
         ))
         .unwrap();
+
     let mut req = request("a", &[], 10, Direction::Both);
     req.kinds.clear();
     let view = store.graph(&req).unwrap();

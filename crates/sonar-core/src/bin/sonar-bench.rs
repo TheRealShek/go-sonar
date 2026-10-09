@@ -8,7 +8,12 @@ use sonar_core::{Backend, Direction, GraphRequest};
 /// Headless measurement client; the Python harness separately samples this process tree.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
-    let argument = |name: &str| args.windows(2).find(|a| a[0] == name).map(|a| a[1].clone());
+    let argument = |name: &str| {
+        args.windows(2)
+            .find(|pair| pair[0] == name)
+            .map(|pair| pair[1].clone())
+    };
+
     let root =
         PathBuf::from(argument("--project").ok_or("--project ROOT is required")?).canonicalize()?;
     let analyzer = PathBuf::from(argument("--analyzer").ok_or("--analyzer PATH is required")?)
@@ -21,23 +26,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !(1..=1000).contains(&iterations) {
         return Err("iterations must be between 1 and 1000".into());
     }
+
     let backend = Backend::new(analyzer, cache);
     let started = Instant::now();
     let first = backend.open(&root)?;
-    emit(
-        json!({"phase":"initial_index","durationMs":started.elapsed().as_secs_f64()*1000.0,"summary":first}),
-    )?;
+    emit(json!({
+        "phase": "initial_index",
+        "durationMs": started.elapsed().as_secs_f64() * 1000.0,
+        "summary": first,
+    }))?;
+
     let started = Instant::now();
     let warm = backend.refresh()?;
-    emit(
-        json!({"phase":"unchanged_refresh","durationMs":started.elapsed().as_secs_f64()*1000.0,"summary":warm}),
-    )?;
+    emit(json!({
+        "phase": "unchanged_refresh",
+        "durationMs": started.elapsed().as_secs_f64() * 1000.0,
+        "summary": warm,
+    }))?;
+
     let symbols = backend.search(&query, 40)?;
     let focus = symbols
         .iter()
         .find(|s| s.name == query)
         .or_else(|| symbols.first())
         .ok_or("no matching focus symbol")?;
+
     let mut request = GraphRequest {
         focus: focus.id.clone(),
         expanded: vec![],
@@ -55,6 +68,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         direction: Direction::Both,
         offsets: Default::default(),
     };
+
     for phase in ["neighborhood", "expanded", "internals"] {
         if phase == "expanded" {
             request.expanded = backend
@@ -69,32 +83,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if phase == "internals" {
             request.internals = vec![request.focus.clone()];
         }
+
         let mut times = Vec::with_capacity(iterations);
-        let mut counts = (0, 0, 0, false);
+        let mut node_count = 0;
+        let mut edge_count = 0;
+        let mut payload_bytes = 0;
+        let mut truncated = false;
+
         for _ in 0..iterations {
             let started = Instant::now();
             let view = backend.graph(&request)?;
             let payload = serde_json::to_vec(&view)?;
             times.push(started.elapsed().as_secs_f64() * 1000.0);
-            counts = (
-                view.nodes.len(),
-                view.edges.len(),
-                payload.len(),
-                view.truncated,
-            );
+
+            node_count = view.nodes.len();
+            edge_count = view.edges.len();
+            payload_bytes = payload.len();
+            truncated = view.truncated;
         }
+
         times.sort_by(f64::total_cmp);
-        emit(
-            json!({"phase":phase,"iterations":iterations,"medianMs":times[iterations/2],
-            "p95Ms":times[((iterations as f64*0.95).ceil() as usize).saturating_sub(1)],
-            "nodes":counts.0,"edges":counts.1,"payloadBytes":counts.2,"truncated":counts.3,
-            "includesRendering":false}),
-        )?;
+        let median_ms = times[iterations / 2];
+        let p95_index = ((iterations as f64 * 0.95).ceil() as usize).saturating_sub(1);
+
+        emit(json!({
+            "phase": phase,
+            "iterations": iterations,
+            "medianMs": median_ms,
+            "p95Ms": times[p95_index],
+            "nodes": node_count,
+            "edges": edge_count,
+            "payloadBytes": payload_bytes,
+            "truncated": truncated,
+            "includesRendering": false,
+        }))?;
     }
+
     if args.iter().any(|a| a == "--exercise-edits") {
         if !root.join(".sonar-benchmark-fixture").is_file() {
             return Err("edit measurements require a generated benchmark fixture".into());
         }
+
         let path = root.join("leaf/leaf.go");
         measure_edit(&backend, &path, "return 1", "return 2", "body_edit")?;
         measure_edit(
@@ -105,10 +134,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "declaration_edit",
         )?;
     }
-    emit(json!({"phase":"complete","includesRendering":false}))?;
+
+    emit(json!({
+        "phase": "complete",
+        "includesRendering": false,
+    }))?;
+
     Ok(())
 }
 
+/// Replace one marker in the owned fixture and time its refreshed index.
 fn measure_edit(
     backend: &Backend,
     file: &Path,
@@ -120,15 +155,20 @@ fn measure_edit(
     if !original.contains(from) {
         return Err(format!("fixture edit marker missing: {from}").into());
     }
+
     std::fs::write(file, original.replacen(from, to, 1))?;
     let started = Instant::now();
     let summary = backend.refresh()?;
-    emit(
-        json!({"phase":phase,"durationMs":started.elapsed().as_secs_f64()*1000.0,"summary":summary}),
-    )?;
+    emit(json!({
+        "phase": phase,
+        "durationMs": started.elapsed().as_secs_f64() * 1000.0,
+        "summary": summary,
+    }))?;
+
     Ok(())
 }
 
+/// Flush one JSON-lines measurement for the external process sampler.
 fn emit(mut event: serde_json::Value) -> io::Result<()> {
     event["kind"] = json!("core");
     println!("{event}");

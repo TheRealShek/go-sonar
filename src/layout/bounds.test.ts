@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 import { displayBounds } from './bounds';
+
 it('fits root geometry and sized groups without treating parent-relative child positions as absolute', () => {
   expect(
     displayBounds([

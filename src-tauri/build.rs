@@ -3,15 +3,18 @@ use std::path::{Path, PathBuf};
 
 fn main() -> std::io::Result<()> {
     tauri_build::build();
+
     // generate_context! reads frontend assets without exposing them in rustc's
     // dependency file. Give Cargo and compiler caches an explicit asset identity.
     let frontend = Path::new("../dist");
     println!("cargo:rerun-if-changed=../dist");
+
     let mut files = Vec::new();
     if frontend.is_dir() {
         collect(frontend, &mut files)?;
     }
     files.sort();
+
     let mut digest = Sha256::new();
     for file in files {
         digest.update(
@@ -23,11 +26,13 @@ fn main() -> std::io::Result<()> {
         digest.update([0]);
         digest.update(std::fs::read(&file)?);
     }
+
     println!("cargo:rustc-check-cfg=cfg(sonar_frontend_digest, values(any()))");
     println!(
         "cargo:rustc-cfg=sonar_frontend_digest=\"{:x}\"",
         digest.finalize()
     );
+
     Ok(())
 }
 

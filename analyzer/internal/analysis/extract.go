@@ -13,7 +13,7 @@ import (
 )
 
 type extractor struct {
-	p       *packages.Package
+	pkg     *packages.Package
 	facts   Facts
 	ids     map[types.Object]string
 	symbols map[string]bool
@@ -25,15 +25,26 @@ func (x *extractor) span(n ast.Node) Span {
 	}
 	return x.positions(n.Pos(), n.End())
 }
+
 func (x *extractor) positions(start, end token.Pos) Span {
-	a, b := x.p.Fset.Position(start), x.p.Fset.Position(end)
-	return Span{a.Filename, a.Line, a.Column, b.Line, b.Column}
+	first := x.pkg.Fset.Position(start)
+	last := x.pkg.Fset.Position(end)
+
+	return Span{
+		File:      first.Filename,
+		Line:      first.Line,
+		Column:    first.Column,
+		EndLine:   last.Line,
+		EndColumn: last.Column,
+	}
 }
+
 func (x *extractor) label(n ast.Node) string {
 	var b bytes.Buffer
-	_ = format.Node(&b, x.p.Fset, n)
+	_ = format.Node(&b, x.pkg.Fset, n)
 	return b.String()
 }
+
 func objectID(obj types.Object) string {
 	pkg := "builtin"
 	if obj.Pkg() != nil {
@@ -42,11 +53,15 @@ func objectID(obj types.Object) string {
 	name := obj.Name()
 	if fn, ok := obj.(*types.Func); ok {
 		if sig, ok := fn.Type().(*types.Signature); ok && sig.Recv() != nil {
-			name = types.TypeString(sig.Recv().Type(), func(p *types.Package) string { return p.Path() }) + "." + name
+			receiver := types.TypeString(sig.Recv().Type(), func(p *types.Package) string {
+				return p.Path()
+			})
+			name = receiver + "." + name
 		}
 	}
 	return pkg + "::" + name
 }
+
 func (x *extractor) symbol(obj types.Object, n ast.Node, doc string) string {
 	if obj == nil {
 		return ""
@@ -59,6 +74,7 @@ func (x *extractor) symbol(obj types.Object, n ast.Node, doc string) string {
 			return ""
 		}
 	}
+
 	id := x.ids[obj]
 	if id == "" {
 		id = objectID(obj)
@@ -67,6 +83,7 @@ func (x *extractor) symbol(obj types.Object, n ast.Node, doc string) string {
 	if x.symbols[id] {
 		return id
 	}
+
 	kind := "variable"
 	switch o := obj.(type) {
 	case *types.Func:
@@ -91,6 +108,7 @@ func (x *extractor) symbol(obj types.Object, n ast.Node, doc string) string {
 	case *types.Builtin:
 		kind = "function"
 	}
+
 	pkg := "builtin"
 	if obj.Pkg() != nil {
 		pkg = obj.Pkg().Path()
@@ -102,15 +120,42 @@ func (x *extractor) symbol(obj types.Object, n ast.Node, doc string) string {
 			doc = "External declaration; source unavailable in loaded export data."
 		}
 	}
-	x.facts.Symbols = append(x.facts.Symbols, Symbol{id, obj.Name(), id, kind, pkg, source, types.ObjectString(obj, func(p *types.Package) string { return p.Path() }), doc, obj.Exported()})
+	signature := types.ObjectString(obj, func(p *types.Package) string {
+		return p.Path()
+	})
+	x.facts.Symbols = append(x.facts.Symbols, Symbol{
+		ID:            id,
+		Name:          obj.Name(),
+		QualifiedName: id,
+		Kind:          kind,
+		PackageID:     pkg,
+		Source:        source,
+		Signature:     signature,
+		Documentation: doc,
+		Exported:      obj.Exported(),
+	})
 	x.symbols[id] = true
 	return id
 }
+
 func extract(p *packages.Package) Facts {
-	x := &extractor{p: p, ids: map[types.Object]string{}, symbols: map[string]bool{}, facts: Facts{ID: p.PkgPath, Files: append([]string{}, p.GoFiles...), Imports: []string{}, Symbols: []Symbol{}, Edges: []Relation{}, Behaviors: []Behavior{}}}
+	x := &extractor{
+		pkg:     p,
+		ids:     map[types.Object]string{},
+		symbols: map[string]bool{},
+		facts: Facts{
+			ID:        p.PkgPath,
+			Files:     append([]string{}, p.GoFiles...),
+			Imports:   []string{},
+			Symbols:   []Symbol{},
+			Edges:     []Relation{},
+			Behaviors: []Behavior{},
+		},
+	}
 	for path := range p.Imports {
 		x.facts.Imports = append(x.facts.Imports, path)
 	}
+
 	// Assign field identities before collecting any uses, including fields with the same name.
 	for _, name := range p.Types.Scope().Names() {
 		if obj, ok := p.Types.Scope().Lookup(name).(*types.TypeName); ok {
@@ -152,6 +197,7 @@ func extract(p *packages.Package) Facts {
 			}
 		}
 	}
+
 	// Register source declarations first so references retain full evidence and documentation.
 	for _, file := range p.Syntax {
 		for _, decl := range file.Decls {
@@ -180,6 +226,7 @@ func extract(p *packages.Package) Facts {
 			}
 		}
 	}
+
 	// Register imported named fields, including keyed composite literals without selections.
 	for _, value := range p.TypesInfo.Types {
 		t := value.Type
@@ -195,6 +242,7 @@ func extract(p *packages.Package) Facts {
 			}
 		}
 	}
+
 	// Imported fields use their declaring named type, including promoted fields.
 	for _, selection := range p.TypesInfo.Selections {
 		obj, ok := selection.Obj().(*types.Var)
@@ -224,6 +272,7 @@ func extract(p *packages.Package) Facts {
 			}
 		}
 	}
+
 	for _, f := range p.Syntax {
 		for _, decl := range f.Decls {
 			switch d := decl.(type) {
@@ -258,6 +307,7 @@ func extract(p *packages.Package) Facts {
 			}
 		}
 	}
+
 	// Interface satisfaction is a possible implementation relationship, not a dynamic call target.
 	namedTypes := []*types.Named{}
 	interfaces := []*types.Named{}
@@ -271,6 +321,7 @@ func extract(p *packages.Package) Facts {
 			}
 		}
 	}
+
 	for _, named := range namedTypes {
 		if _, ok := named.Underlying().(*types.Interface); ok {
 			continue
@@ -280,22 +331,33 @@ func extract(p *packages.Package) Facts {
 			if types.Implements(named, iface) || types.Implements(types.NewPointer(named), iface) {
 				owner, target := x.symbol(named.Obj(), nil, ""), x.symbol(contract.Obj(), nil, "")
 				id := owner + ":implements:" + target
-				x.facts.Edges = append(x.facts.Edges, Relation{id, owner, target, "implements", "compatible with " + contract.Obj().Name(), "possible", x.positions(named.Obj().Pos(), named.Obj().Pos())})
+				x.facts.Edges = append(x.facts.Edges, Relation{
+					ID:        id,
+					Source:    owner,
+					Target:    target,
+					Kind:      "implements",
+					Label:     "compatible with " + contract.Obj().Name(),
+					Certainty: "possible",
+					Evidence:  x.positions(named.Obj().Pos(), named.Obj().Pos()),
+				})
 			}
 		}
 	}
+
 	sort.Strings(x.facts.Files)
 	sort.Strings(x.facts.Imports)
 	sort.Slice(x.facts.Symbols, func(i, j int) bool { return x.facts.Symbols[i].ID < x.facts.Symbols[j].ID })
 	sort.Slice(x.facts.Edges, func(i, j int) bool { return x.facts.Edges[i].ID < x.facts.Edges[j].ID })
 	return x.facts
 }
+
 func comment(c *ast.CommentGroup) string {
 	if c == nil {
 		return ""
 	}
 	return c.Text()
 }
+
 func (x *extractor) edge(owner string, obj types.Object, kind string, n ast.Node, certainty string) {
 	if obj == nil || owner == "" {
 		return
@@ -307,16 +369,25 @@ func (x *extractor) edge(owner string, obj types.Object, kind string, n ast.Node
 	if target == "" {
 		return
 	}
-	e := x.span(n)
-	id := fmt.Sprintf("%s:%s:%s:%s:%d:%d", owner, kind, target, e.File, e.Line, e.Column)
-	x.facts.Edges = append(x.facts.Edges, Relation{id, owner, target, kind, kind + " " + obj.Name(), certainty, e})
+	evidence := x.span(n)
+	id := fmt.Sprintf("%s:%s:%s:%s:%d:%d", owner, kind, target, evidence.File, evidence.Line, evidence.Column)
+	x.facts.Edges = append(x.facts.Edges, Relation{
+		ID:        id,
+		Source:    owner,
+		Target:    target,
+		Kind:      kind,
+		Label:     kind + " " + obj.Name(),
+		Certainty: certainty,
+		Evidence:  evidence,
+	})
 }
+
 func (x *extractor) callee(expr ast.Expr) types.Object {
 	switch e := expr.(type) {
 	case *ast.Ident:
-		return x.p.TypesInfo.Uses[e]
+		return x.pkg.TypesInfo.Uses[e]
 	case *ast.SelectorExpr:
-		return x.p.TypesInfo.Uses[e.Sel]
+		return x.pkg.TypesInfo.Uses[e.Sel]
 	case *ast.IndexExpr:
 		return x.callee(e.X)
 	case *ast.IndexListExpr:
@@ -326,6 +397,7 @@ func (x *extractor) callee(expr ast.Expr) types.Object {
 	}
 	return nil
 }
+
 func (x *extractor) relations(owner string, n ast.Node) {
 	writes := map[*ast.Ident]bool{}
 	reads := map[*ast.Ident]bool{}
@@ -368,7 +440,7 @@ func (x *extractor) relations(owner string, n ast.Node) {
 					certainty = "possible"
 				}
 				if sel, ok := s.Fun.(*ast.SelectorExpr); ok {
-					if selection := x.p.TypesInfo.Selections[sel]; selection != nil {
+					if selection := x.pkg.TypesInfo.Selections[sel]; selection != nil {
 						if _, ok := selection.Recv().Underlying().(*types.Interface); ok {
 							certainty = "possible"
 						}
@@ -394,6 +466,7 @@ func (x *extractor) relations(owner string, n ast.Node) {
 		}
 		return true
 	})
+
 	ast.Inspect(n, func(node ast.Node) bool {
 		if _, ok := node.(*ast.FuncLit); ok {
 			return false
@@ -402,7 +475,7 @@ func (x *extractor) relations(owner string, n ast.Node) {
 		if !ok {
 			return true
 		}
-		obj := x.p.TypesInfo.Uses[id]
+		obj := x.pkg.TypesInfo.Uses[id]
 		if obj == nil || calls[id] {
 			return true
 		}

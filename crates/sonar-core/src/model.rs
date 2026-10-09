@@ -147,16 +147,16 @@ pub struct ViewNode {
 }
 
 impl From<Symbol> for ViewNode {
-    fn from(s: Symbol) -> Self {
+    fn from(symbol: Symbol) -> Self {
         Self {
-            id: s.id,
-            name: s.name,
-            qualified_name: s.qualified_name,
-            kind: s.kind,
-            package_id: s.package_id,
-            source: s.source,
-            signature: s.signature,
-            documentation: s.documentation,
+            id: symbol.id,
+            name: symbol.name,
+            qualified_name: symbol.qualified_name,
+            kind: symbol.kind,
+            package_id: symbol.package_id,
+            source: symbol.source,
+            signature: symbol.signature,
+            documentation: symbol.documentation,
             parent_id: None,
             related_symbol_id: None,
         }

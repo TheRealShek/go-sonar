@@ -10,7 +10,9 @@ import type {
 import { sampleBackend } from './sample';
 import { QueryQueue } from './requests';
 import type { BenchmarkConfig, BenchmarkReport } from './benchmark';
+
 export const isDesktop = '__TAURI_INTERNALS__' in window;
+
 export interface Backend {
   open(root: string): Promise<ProjectSummary>;
   refresh(): Promise<ProjectSummary>;
@@ -19,6 +21,7 @@ export interface Backend {
   source(source: SourceSpan): Promise<SourceExcerpt>;
   impact(symbolId: string, category: string): Promise<GraphView>;
 }
+
 const transport: Backend = isDesktop
   ? {
       open: (root) => invoke('open_project', { root }),
@@ -32,6 +35,7 @@ const transport: Backend = isDesktop
 
 const views = new QueryQueue<GraphView>();
 const searches = new QueryQueue<SymbolFact[]>();
+
 export const backend: Backend = {
   ...transport,
   graph: (request) => views.execute(() => transport.graph(request)),
@@ -41,6 +45,7 @@ export const backend: Backend = {
 
 export const benchmarkConfig = (): Promise<BenchmarkConfig | null> =>
   isDesktop ? invoke('benchmark_config') : Promise.resolve(null);
+
 export const benchmarkReport = (report: BenchmarkReport): Promise<void> =>
   isDesktop
     ? invoke('benchmark_report', { report })

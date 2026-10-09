@@ -1,4 +1,5 @@
 import type { Point } from './contract';
+
 export interface DisplayBounds {
   x: number;
   y: number;
@@ -12,8 +13,10 @@ export function displayBounds(
 ): DisplayBounds | undefined {
   const roots = nodes.filter((node) => !node.parentId);
   if (!roots.length) return undefined;
+
   const x = Math.min(...roots.map((node) => node.position.x));
   const y = Math.min(...roots.map((node) => node.position.y));
+
   return {
     x,
     y,
