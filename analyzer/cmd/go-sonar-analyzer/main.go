@@ -24,6 +24,7 @@ type request struct {
 	Method  string `json:"method"`
 	Root    string `json:"root"`
 }
+
 type response struct {
 	Version int             `json:"version"`
 	ID      string          `json:"id"`
@@ -35,34 +36,41 @@ func serve(ctx context.Context, in io.Reader, out io.Writer) error {
 	scan := bufio.NewScanner(in)
 	scan.Buffer(make([]byte, 4096), maxRequestBytes)
 	engine := &analysis.Engine{}
+
 	for scan.Scan() {
-		r := request{}
+		incoming := request{}
 		reply := response{Version: 1}
-		err := json.Unmarshal(scan.Bytes(), &r)
-		reply.ID = r.ID
+		err := json.Unmarshal(scan.Bytes(), &incoming)
+		reply.ID = incoming.ID
 		if err != nil {
 			reply.Error = "invalid JSON request"
-		} else if r.Version != 1 || r.Method != "analyze" || !filepath.IsAbs(r.Root) {
+		} else if incoming.Version != 1 || incoming.Method != "analyze" || !filepath.IsAbs(incoming.Root) {
 			reply.Error = "expected version 1 analyze request with root"
 		} else {
-			batch, err := engine.Analyze(ctx, r.Root)
+			batch, err := engine.Analyze(ctx, incoming.Root)
 			if err != nil {
 				reply.Error = err.Error()
 			} else {
 				reply.Result = &batch
 			}
 		}
+
 		data, err := json.Marshal(reply)
 		if err != nil {
 			return fmt.Errorf("encode response: %w", err)
 		}
 		if len(data)+1 > maxResponseBytes {
 			engine = &analysis.Engine{}
-			data, err = json.Marshal(response{Version: 1, ID: reply.ID, Error: "analysis response exceeds 64 MiB transport limit"})
+			data, err = json.Marshal(response{
+				Version: 1,
+				ID:      reply.ID,
+				Error:   "analysis response exceeds 64 MiB transport limit",
+			})
 			if err != nil {
 				return fmt.Errorf("encode size error: %w", err)
 			}
 		}
+
 		data = append(data, '\n')
 		if _, err := out.Write(data); err != nil {
 			return fmt.Errorf("write response: %w", err)
@@ -71,15 +79,21 @@ func serve(ctx context.Context, in io.Reader, out io.Writer) error {
 			return ctx.Err()
 		}
 	}
+
 	if err := scan.Err(); err != nil {
 		return fmt.Errorf("read request: %w", err)
 	}
 	return nil
 }
-func run(ctx context.Context) error { return serve(ctx, os.Stdin, os.Stdout) }
+
+func run(ctx context.Context) error {
+	return serve(ctx, os.Stdin, os.Stdout)
+}
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
 	if err := run(ctx); err != nil {
 		slog.Error("analyzer stopped", "error", err)
 		os.Exit(1)

@@ -49,6 +49,7 @@ type SymbolNode = Node<{
   grouped: boolean;
   focused: boolean;
 }>;
+
 function SymbolCard({ data }: NodeProps<SymbolNode>) {
   return (
     <>
@@ -67,7 +68,9 @@ function SymbolCard({ data }: NodeProps<SymbolNode>) {
     </>
   );
 }
+
 const nodeTypes = { symbol: SymbolCard };
+
 declare global {
   interface Window {
     __SONAR_METRICS__: {
@@ -92,48 +95,61 @@ window.__SONAR_METRICS__ = {
   snapshot: '',
   requests: 0,
 };
+
 const formatSource = (span: SourceSpan) => `${span.file}:${span.line}:${span.column}`;
 
 export default function App() {
   const [root, setRoot] = useState('');
   const [project, setProject] = useState<ProjectSummary>();
+
   const [query, setQuery] = useState('');
   const [matches, setMatches] = useState<SymbolFact[]>([]);
+
   const [request, setRequest] = useState<GraphRequest>();
   const [history, setHistory] = useState<GraphRequest[]>([]);
+
   const [view, setView] = useState<GraphView>();
   const [nodes, setNodes] = useState<SymbolNode[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
+
   const [selected, setSelected] = useState<ViewNode | ViewEdge>();
   const [excerpt, setExcerpt] = useState<SourceExcerpt>();
+
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [impact, setImpact] = useState('');
+
   const layout = useRef<LayoutClient | null>(null);
   const latest = useRef(new LatestRequest());
   const searchLatest = useRef(new LatestRequest());
   const sourceLatest = useRef(new LatestRequest());
   const projectLatest = useRef(new LatestRequest());
   const benchmarking = useRef(false);
+
   const positions = useRef(
     new Map<string, { x: number; y: number; width: number; height: number; parentId?: string }>(),
   );
   const flow = useRef<ReactFlowInstance<SymbolNode> | null>(null);
+
   useEffect(() => {
     layout.current = new LayoutClient();
     window.__SONAR_METRICS__.ready = true;
+
     return () => {
       latest.current.invalidate();
       layout.current?.dispose();
       window.__SONAR_METRICS__.ready = false;
     };
   }, []);
+
   useEffect(() => {
     const current = searchLatest.current.next();
+
     if (!project || benchmarking.current) {
       setMatches([]);
       return;
     }
+
     const timer = setTimeout(
       () =>
         backend
@@ -146,29 +162,37 @@ export default function App() {
           }),
       180,
     );
+
     return () => clearTimeout(timer);
   }, [query, project]);
+
   const navigate = (next: GraphRequest, record = true) => {
     if (record && request) setHistory((previous) => [...previous.slice(-19), request]);
+
     setImpact('');
     setRequest(next);
   };
+
   const loadProject = async (refresh = false) => {
     const current = projectLatest.current.next();
     latest.current.invalidate();
     searchLatest.current.invalidate();
     sourceLatest.current.invalidate();
+
     setBusy(true);
     setError('');
     setExcerpt(undefined);
     setSelected(undefined);
+
     // Old facts are removed while a replacement snapshot is being analyzed.
     setView(undefined);
     setNodes([]);
     setEdges([]);
+
     try {
       const summary = await (refresh ? backend.refresh() : backend.open(root));
       if (!current()) return;
+
       setProject(summary);
       if (refresh && request) setRequest({ ...request });
       else {
@@ -186,6 +210,7 @@ export default function App() {
       if (current()) setBusy(false);
     }
   };
+
   const paintView = useCallback(
     async (
       result: GraphView,
@@ -194,14 +219,17 @@ export default function App() {
       mode: PresentationMode = 'frames',
     ) => {
       validateView(result, VIEW_LIMIT);
+
       const grouped = new Set(
         result.nodes.filter((node) => node.parentId).map((node) => node.parentId),
       );
+
       const layoutStarted = performance.now();
       const geometry: LayoutResult = await layout.current!.layout({
         nodes: result.nodes.map((node) => {
           const old = positions.current.get(node.id);
           const sameGroup = old?.parentId === node.parentId;
+
           return {
             id: node.id,
             parentId: node.parentId,
@@ -214,10 +242,12 @@ export default function App() {
       });
       const layoutMs = performance.now() - layoutStarted;
       if (!current()) return;
+
       const ordered = [
         ...result.nodes.filter((node) => !node.parentId),
         ...result.nodes.filter((node) => node.parentId),
       ];
+
       const commitStarted = performance.now();
       flushSync(() => {
         setNodes(
@@ -226,6 +256,10 @@ export default function App() {
             const position = geometry.positions[node.id];
             positions.current.set(node.id, { ...position, ...size, parentId: node.parentId });
             const summary = result.summaries.find((item) => item.nodeId === node.id);
+            const summaryText = summary
+              ? `${summary.incoming} in · ${summary.outgoing} out${summary.hidden ? ` · ${summary.hidden} hidden` : ''}`
+              : '';
+
             return {
               id: node.id,
               type: 'symbol',
@@ -240,13 +274,12 @@ export default function App() {
                 kind: node.kind,
                 grouped: grouped.has(node.id),
                 focused: node.id === result.focus,
-                summary: summary
-                  ? `${summary.incoming} in · ${summary.outgoing} out${summary.hidden ? ` · ${summary.hidden} hidden` : ''}`
-                  : '',
+                summary: summaryText,
               },
             };
           }),
         );
+
         setEdges(
           result.edges.map((edge) => ({
             id: edge.id,
@@ -263,6 +296,7 @@ export default function App() {
             reconnectable: false,
           })),
         );
+
         setView(result);
         setSelected((previous) =>
           previous
@@ -273,9 +307,11 @@ export default function App() {
         setExcerpt(undefined);
       });
       const commitMs = performance.now() - commitStarted;
+
       // Position memory is bounded independently of the source index.
       while (positions.current.size > 400)
         positions.current.delete(positions.current.keys().next().value!);
+
       Object.assign(window.__SONAR_METRICS__, {
         nodes: result.nodes.length,
         edges: result.edges.length,
@@ -283,10 +319,12 @@ export default function App() {
         expansionMs: performance.now() - started,
         snapshot: result.snapshot,
       });
+
       const presentation = await measurePresentation(
         current,
         async () => {
           if (!flow.current) throw new Error('Graph viewport is not ready');
+
           const bounds = displayBounds(
             ordered.map((node) => ({
               parentId: node.parentId,
@@ -294,6 +332,7 @@ export default function App() {
               ...geometry.sizes[node.id],
             })),
           );
+
           if (bounds) await flow.current.fitBounds(bounds, { padding: 0.2, duration: 0 });
         },
         undefined,
@@ -301,6 +340,7 @@ export default function App() {
         mode,
       );
       window.__SONAR_METRICS__.expansionMs = performance.now() - started;
+
       return {
         presentation: mode,
         includesFramePresentation: mode === 'frames',
@@ -316,13 +356,16 @@ export default function App() {
     },
     [],
   );
+
   useEffect(() => {
     if (!request || !project || benchmarking.current) return;
-    const current = latest.current.next(),
-      started = performance.now();
+
+    const current = latest.current.next();
+    const started = performance.now();
     setBusy(true);
     setError('');
     window.__SONAR_METRICS__.requests++;
+
     (impact ? backend.impact(request.focus, impact) : backend.graph(request))
       .then((result) => {
         if (!current()) return;
@@ -330,6 +373,7 @@ export default function App() {
           throw new Error(
             'Analysis snapshot changed. Refresh the project to retrieve a consistent view.',
           );
+
         return paintView(result, current, started);
       })
       .catch((err) => {
@@ -338,8 +382,10 @@ export default function App() {
       .finally(() => {
         if (current()) setBusy(false);
       });
+
     return () => latest.current.invalidate();
   }, [request, project, impact, paintView]);
+
   useNativeBenchmark({
     active: benchmarking,
     begin: (config) => {
@@ -362,14 +408,18 @@ export default function App() {
       setError(String(error));
     },
   });
+
   const selectedNode = selected && 'name' in selected ? selected : undefined;
   const selectedSummary = selectedNode
     ? view?.summaries.find((summary) => summary.nodeId === selectedNode.id)
     : undefined;
+
   const inspect = async () => {
     if (!selected) return;
+
     const current = sourceLatest.current.next();
     setExcerpt(undefined);
+
     try {
       const result = await backend.source(
         'evidence' in selected ? selected.evidence : selected.source,
@@ -379,11 +429,13 @@ export default function App() {
       if (current()) setError(String(err));
     }
   };
+
   const select = (value: ViewNode | ViewEdge) => {
     sourceLatest.current.invalidate();
     setSelected(value);
     setExcerpt(undefined);
   };
+
   const change = (updates: Partial<GraphRequest>) => {
     if (request)
       navigate({
@@ -392,14 +444,23 @@ export default function App() {
         ...(updates.kinds || updates.direction ? { offsets: {} } : {}),
       });
   };
+
   const onNodesChange = (changes: NodeChange<SymbolNode>[]) => {
     setNodes((current) => applyNodeChanges(changes, current));
+
     for (const change of changes)
       if (change.type === 'position' && change.position) {
         const old = positions.current.get(change.id);
         if (old) positions.current.set(change.id, { ...old, ...change.position });
       }
   };
+
+  const statusLabel = busy
+    ? 'Analyzing / laying out…'
+    : view
+      ? `${view.nodes.length} nodes · ${view.edges.length} edges${view.truncated ? ' · view limit reached' : ''}`
+      : 'Choose a project, then a symbol';
+
   return (
     <div className="app">
       <header>
@@ -525,6 +586,7 @@ export default function App() {
                     height: node.height ?? 88,
                   })),
                 );
+
                 if (bounds) void flow.current?.fitBounds(bounds, { padding: 0.2 });
               }}
             >
@@ -536,13 +598,7 @@ export default function App() {
             >
               Collapse branches
             </button>
-            <span role="status">
-              {busy
-                ? 'Analyzing / laying out…'
-                : view
-                  ? `${view.nodes.length} nodes · ${view.edges.length} edges${view.truncated ? ' · view limit reached' : ''}`
-                  : 'Choose a project, then a symbol'}
-            </span>
+            <span role="status">{statusLabel}</span>
           </div>
           {error && (
             <div role="alert" className="error">
@@ -566,14 +622,17 @@ export default function App() {
               onNodesChange={onNodesChange}
               onNodeClick={(_, node) => {
                 const fact = view?.nodes.find((value) => value.id === node.id);
+
                 if (fact) select(fact);
               }}
               onEdgeClick={(_, edge) => {
                 const fact = view?.edges.find((value) => value.id === edge.id);
+
                 if (fact) select(fact);
               }}
               onNodeDoubleClick={(_, node) => {
                 const fact = view?.nodes.find((value) => value.id === node.id);
+
                 if (fact) navigate(requestFor(fact.relatedSymbolId ?? fact.parentId ?? fact.id));
               }}
               nodesConnectable={false}

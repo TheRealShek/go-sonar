@@ -22,10 +22,16 @@ struct BenchmarkConfig {
 #[tauri::command]
 fn benchmark_config() -> Result<Option<BenchmarkConfig>, String> {
     let args: Vec<String> = std::env::args().collect();
-    let argument = |name: &str| args.windows(2).find(|a| a[0] == name).map(|a| a[1].clone());
+    let argument = |name: &str| {
+        args.windows(2)
+            .find(|pair| pair[0] == name)
+            .map(|pair| pair[1].clone())
+    };
+
     let Some(root) = argument("--benchmark") else {
         return Ok(None);
     };
+
     let iterations: usize = argument("--iterations")
         .unwrap_or_else(|| "20".into())
         .parse()
@@ -33,6 +39,7 @@ fn benchmark_config() -> Result<Option<BenchmarkConfig>, String> {
     if !(1..=1000).contains(&iterations) {
         return Err("benchmark iterations must be 1..1000".into());
     }
+
     Ok(Some(BenchmarkConfig {
         root,
         query: argument("--query").unwrap_or_else(|| "Get".into()),
@@ -49,14 +56,20 @@ fn benchmark_config() -> Result<Option<BenchmarkConfig>, String> {
 #[tauri::command]
 fn benchmark_report(report: serde_json::Value) -> Result<(), String> {
     use std::io::Write;
+
     if benchmark_config()?.is_none() {
         return Err("benchmark mode is disabled".into());
     }
-    let line = serde_json::to_string(&serde_json::json!({"kind":"renderer","report":report}))
-        .map_err(|e| e.to_string())?;
+
+    let event = serde_json::json!({
+        "kind": "renderer",
+        "report": report,
+    });
+    let line = serde_json::to_string(&event).map_err(|e| e.to_string())?;
     if line.len() > 16 * 1024 {
         return Err("benchmark report exceeds 16 KiB".into());
     }
+
     println!("{line}");
     std::io::stdout().flush().map_err(|e| e.to_string())
 }
@@ -64,19 +77,21 @@ fn benchmark_report(report: serde_json::Value) -> Result<(), String> {
 #[tauri::command]
 async fn open_project(state: State<'_>, root: String) -> Result<ProjectSummary, String> {
     let backend = Arc::clone(state.inner());
-    tauri::async_runtime::spawn_blocking(move || backend.open(&PathBuf::from(root)))
+    let result = tauri::async_runtime::spawn_blocking(move || backend.open(&PathBuf::from(root)))
         .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+
+    result.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn refresh_project(state: State<'_>) -> Result<ProjectSummary, String> {
     let backend = Arc::clone(state.inner());
-    tauri::async_runtime::spawn_blocking(move || backend.refresh())
+    let result = tauri::async_runtime::spawn_blocking(move || backend.refresh())
         .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+
+    result.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -86,19 +101,21 @@ async fn search_symbols(
     limit: usize,
 ) -> Result<Vec<Symbol>, String> {
     let backend = Arc::clone(state.inner());
-    tauri::async_runtime::spawn_blocking(move || backend.search(&query, limit))
+    let result = tauri::async_runtime::spawn_blocking(move || backend.search(&query, limit))
         .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+
+    result.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn graph_view(state: State<'_>, request: GraphRequest) -> Result<GraphView, String> {
     let backend = Arc::clone(state.inner());
-    tauri::async_runtime::spawn_blocking(move || backend.graph(&request))
+    let result = tauri::async_runtime::spawn_blocking(move || backend.graph(&request))
         .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+
+    result.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -109,19 +126,22 @@ async fn impact_view(
     limit: usize,
 ) -> Result<GraphView, String> {
     let backend = Arc::clone(state.inner());
-    tauri::async_runtime::spawn_blocking(move || backend.impact(&symbol_id, &category, limit))
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())
+    let result =
+        tauri::async_runtime::spawn_blocking(move || backend.impact(&symbol_id, &category, limit))
+            .await
+            .map_err(|e| e.to_string())?;
+
+    result.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn source_excerpt(state: State<'_>, source: SourceSpan) -> Result<SourceExcerpt, String> {
     let backend = Arc::clone(state.inner());
-    tauri::async_runtime::spawn_blocking(move || backend.source(&source))
+    let result = tauri::async_runtime::spawn_blocking(move || backend.source(&source))
         .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+
+    result.map_err(|e| e.to_string())
 }
 
 /// Resolve only the packaged helper or a developer-specified trusted executable.
@@ -129,6 +149,7 @@ fn analyzer_path() -> std::io::Result<PathBuf> {
     if let Some(path) = std::env::var_os("GO_SONAR_ANALYZER") {
         return Ok(PathBuf::from(path));
     }
+
     let executable = std::env::current_exe()?;
     let sibling = executable.with_file_name(if cfg!(windows) {
         "go-sonar-analyzer.exe"
@@ -138,6 +159,7 @@ fn analyzer_path() -> std::io::Result<PathBuf> {
     if sibling.is_file() {
         return Ok(sibling);
     }
+
     #[cfg(debug_assertions)]
     {
         let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries");
@@ -151,6 +173,7 @@ fn analyzer_path() -> std::io::Result<PathBuf> {
             }
         }
     }
+
     Err(std::io::Error::new(
         std::io::ErrorKind::NotFound,
         "bundled Go analyzer is missing",
@@ -167,7 +190,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 app.path().app_cache_dir()?.join("indexes")
             };
-            app.manage(Arc::new(Backend::new(analyzer_path()?, cache)));
+
+            let analyzer = analyzer_path()?;
+            let backend = Backend::new(analyzer, cache);
+            app.manage(Arc::new(backend));
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -181,5 +208,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             benchmark_report
         ])
         .run(tauri::generate_context!())?;
+
     Ok(())
 }

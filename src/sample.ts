@@ -1,5 +1,6 @@
 import type { Backend } from './backend';
 import type { GraphRequest, GraphView, SourceSpan, ViewNode, ViewEdge } from './shared/protocol';
+
 const source = (line: number): SourceSpan => ({
   file: '/sample/catalog/catalog.go',
   line,
@@ -7,6 +8,7 @@ const source = (line: number): SourceSpan => ({
   endLine: line,
   endColumn: 70,
 });
+
 const node = (
   id: string,
   name: string,
@@ -24,6 +26,7 @@ const node = (
   documentation: '',
   ...(parentId ? { parentId } : {}),
 });
+
 const symbols = [
   node('get', 'Get', 'function', 7),
   node('item', 'Item', 'struct', 3),
@@ -32,6 +35,7 @@ const symbols = [
   node('name', 'Name', 'field', 4),
   node('handler', 'Handler', 'function', 23),
 ];
+
 const edge = (
   id: string,
   from: string,
@@ -48,6 +52,7 @@ const edge = (
   certainty: 'resolved',
   evidence: source(line),
 });
+
 const relations = [
   edge('get-load', 'get', 'load', 'calls', 'calls on cache miss', 12),
   edge('get-cache', 'get', 'cache', 'reads', 'reads cached item', 8),
@@ -56,6 +61,7 @@ const relations = [
   edge('handler-get', 'handler', 'get', 'calls', 'calls Get', 23),
   edge('load-name', 'load', 'name', 'writes', 'initializes Name', 20),
 ];
+
 const internals = [
   node('entry', 'Input: key', 'entry', 7, 'get'),
   node('lookup', 'Lookup cache[key]', 'operation', 8, 'get'),
@@ -67,6 +73,7 @@ const internals = [
   node('store', 'cache[key] = item', 'operation', 16, 'get'),
   node('result', 'Return loaded item', 'return', 17, 'get'),
 ];
+
 const control = [
   edge('c1', 'entry', 'lookup', 'control', 'next', 8),
   edge('c2', 'lookup', 'hit', 'control', 'next', 9),
@@ -79,23 +86,51 @@ const control = [
   edge('d1', 'fetch', 'store', 'data', 'loaded item', 16),
   edge('cross', 'fetch', 'load', 'calls', 'call target', 12),
 ];
-const text = `package catalog\n\ntype Item struct {\n    Name string\n}\nvar cache = map[string]Item{}\nfunc Get(key string) (Item, error) {\n    item, ok := cache[key]\n    if ok {\n        return item, nil\n    }\n    item, err := Load(key)\n    if err != nil {\n        return Item{}, err\n    }\n    cache[key] = item\n    return item, nil\n}\nfunc Load(key string) (Item, error) {\n    return Item{Name: key}, nil\n}\n\nfunc Handler(key string) { Get(key) }`;
+
+const text = `package catalog
+
+type Item struct {
+    Name string
+}
+var cache = map[string]Item{}
+func Get(key string) (Item, error) {
+    item, ok := cache[key]
+    if ok {
+        return item, nil
+    }
+    item, err := Load(key)
+    if err != nil {
+        return Item{}, err
+    }
+    cache[key] = item
+    return item, nil
+}
+func Load(key string) (Item, error) {
+    return Item{Name: key}, nil
+}
+
+func Handler(key string) { Get(key) }`;
+
 function view(request: GraphRequest): GraphView {
   const ids = new Set([request.focus]);
   const selected: ViewEdge[] = [];
-  for (const id of new Set([request.focus, ...request.expanded]))
+
+  for (const id of new Set([request.focus, ...request.expanded])) {
     for (const relation of relations) {
       const direction = request.direction ?? 'both';
-      if (
+      const visibleRelation =
         request.kinds.includes(relation.kind) &&
         ((direction !== 'incoming' && relation.source === id) ||
-          (direction !== 'outgoing' && relation.target === id))
-      ) {
+          (direction !== 'outgoing' && relation.target === id));
+
+      if (visibleRelation) {
         ids.add(relation.source);
         ids.add(relation.target);
         if (!selected.some((edge) => edge.id === relation.id)) selected.push(relation);
       }
     }
+  }
+
   let nodes = symbols.filter((node) => ids.has(node.id));
   if (request.internals.includes('get') && ids.has('get')) {
     nodes = [...nodes, ...internals];
@@ -107,9 +142,11 @@ function view(request: GraphRequest): GraphView {
       ),
     );
   }
+
   const truncated = nodes.length > request.limit;
   nodes = nodes.slice(0, request.limit);
   const shown = new Set(nodes.map((node) => node.id));
+
   return {
     snapshot: 'sample-v1',
     focus: request.focus,
@@ -121,6 +158,7 @@ function view(request: GraphRequest): GraphView {
         const connected = relations.filter(
           (edge) => edge.source === node.id || edge.target === node.id,
         );
+
         return {
           nodeId: node.id,
           incoming: connected.filter((edge) => edge.target === node.id).length,
@@ -131,6 +169,7 @@ function view(request: GraphRequest): GraphView {
     truncated,
   };
 }
+
 const summary = {
   root: '/sample/catalog',
   name: 'Sample catalog (illustrative)',
@@ -146,6 +185,7 @@ const summary = {
     },
   ],
 };
+
 export const sampleBackend: Backend = {
   open: async () => summary,
   refresh: async () => summary,

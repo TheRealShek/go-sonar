@@ -12,12 +12,14 @@ fn persistence_failure_restarts_helper_before_retrying() {
         eprintln!("SKIPPED: build the real analyzer helper first");
         return;
     }
+
     let temporary = tempfile::tempdir().unwrap();
     let cache = temporary.path().join("cache");
     std::fs::write(&cache, "not a directory").unwrap();
     let backend = Backend::new(helper, cache.clone());
     let root = repository.join("fixtures/sample");
     assert!(backend.open(&root).is_err());
+
     std::fs::remove_file(&cache).unwrap();
     let recovered = backend.open(&root).unwrap();
     assert!(recovered.symbol_count >= 8);
@@ -43,6 +45,7 @@ fn changed_source_cannot_be_displayed_using_published_coordinates() {
         eprintln!("SKIPPED: build the real analyzer helper first");
         return;
     }
+
     let temporary = tempfile::tempdir().unwrap();
     let root = temporary.path().join("module");
     std::fs::create_dir(&root).unwrap();
@@ -50,6 +53,7 @@ fn changed_source_cannot_be_displayed_using_published_coordinates() {
     let source = root.join("evidence.go");
     let original = "package evidence\nfunc Get() int { return 1 }\n";
     std::fs::write(&source, original).unwrap();
+
     let backend = Backend::new(helper, temporary.path().join("cache"));
     backend.open(&root).unwrap();
     let symbol = backend.search("Get", 10).unwrap().remove(0);
@@ -60,9 +64,11 @@ fn changed_source_cannot_be_displayed_using_published_coordinates() {
             .text
             .contains("return 1")
     );
+
     std::fs::write(&source, format!("// edited before refreshing\n{original}")).unwrap();
     let error = backend.source(&symbol.source).unwrap_err();
     assert!(error.to_string().contains("source changed since analysis"));
+
     backend.refresh().unwrap();
     let refreshed = backend.search("Get", 10).unwrap().remove(0);
     assert_eq!(refreshed.source.line, 3);

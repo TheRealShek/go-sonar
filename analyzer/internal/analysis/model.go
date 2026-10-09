@@ -36,10 +36,11 @@ type Relation struct {
 
 // Node describes one static operation or decision inside a function.
 type Node struct {
-	ID              string `json:"id"`
-	Kind            string `json:"kind"`
-	Label           string `json:"label"`
-	Source          Span   `json:"source"`
+	ID     string `json:"id"`
+	Kind   string `json:"kind"`
+	Label  string `json:"label"`
+	Source Span   `json:"source"`
+
 	RelatedSymbolID string `json:"relatedSymbolId,omitempty"`
 }
 
@@ -65,10 +66,11 @@ type Facts struct {
 	ID                 string            `json:"id"`
 	Files              []string          `json:"files"`
 	Fingerprint        string            `json:"fingerprint"`
-	Imports            []string          `json:"imports"`
-	Symbols            []Symbol          `json:"symbols"`
-	Edges              []Relation        `json:"edges"`
-	Behaviors          []Behavior        `json:"behaviors"`
+
+	Imports   []string   `json:"imports"`
+	Symbols   []Symbol   `json:"symbols"`
+	Edges     []Relation `json:"edges"`
+	Behaviors []Behavior `json:"behaviors"`
 }
 
 // Stats reports the work performed for one request.
@@ -88,11 +90,12 @@ type Diagnostic struct {
 
 // Batch contains an atomic incremental analysis update.
 type Batch struct {
-	Full            bool         `json:"full"`
-	Root            string       `json:"root"`
-	Snapshot        string       `json:"snapshot"`
-	Packages        []Facts      `json:"packages"`
-	RemovedPackages []string     `json:"removedPackages"`
-	Stats           Stats        `json:"stats"`
-	Diagnostics     []Diagnostic `json:"diagnostics"`
+	Full            bool     `json:"full"`
+	Root            string   `json:"root"`
+	Snapshot        string   `json:"snapshot"`
+	Packages        []Facts  `json:"packages"`
+	RemovedPackages []string `json:"removedPackages"`
+
+	Stats       Stats        `json:"stats"`
+	Diagnostics []Diagnostic `json:"diagnostics"`
 }

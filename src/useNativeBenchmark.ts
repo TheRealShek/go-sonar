@@ -9,18 +9,24 @@ interface BenchmarkBindings {
   finish: () => void;
   failed: (error: unknown) => void;
 }
+
 export function useNativeBenchmark(bindings: BenchmarkBindings): void {
   const handlers = useRef(bindings);
   handlers.current = bindings;
+
   useEffect(() => {
     if (!isDesktop) return;
+
     let mounted = true;
     const current = () => mounted;
+
     void benchmarkConfig()
       .then(async (config) => {
         if (!config || !current()) return;
+
         handlers.current.active.current = true;
         handlers.current.begin(config);
+
         await runBenchmark(config, {
           backend,
           current,
@@ -29,6 +35,7 @@ export function useNativeBenchmark(bindings: BenchmarkBindings): void {
             handlers.current.render(view, valid, started, presentation),
           report: benchmarkReport,
         });
+
         if (current()) {
           handlers.current.active.current = false;
           handlers.current.finish();
@@ -40,6 +47,7 @@ export function useNativeBenchmark(bindings: BenchmarkBindings): void {
           handlers.current.failed(error);
         }
       });
+
     return () => {
       mounted = false;
       handlers.current.active.current = false;

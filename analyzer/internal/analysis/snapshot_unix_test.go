@@ -28,8 +28,13 @@ func TestSpecialInputsRejectPromptly(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+
 			done := make(chan error, 1)
-			go func() { _, err := (&Engine{}).Analyze(context.Background(), root); done <- err }()
+			go func() {
+				_, err := (&Engine{}).Analyze(context.Background(), root)
+				done <- err
+			}()
+
 			select {
 			case err := <-done:
 				if err == nil {

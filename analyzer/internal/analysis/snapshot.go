@@ -25,6 +25,7 @@ func readRegularFile(path string) ([]byte, error) {
 	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("input %s must be a regular file", path)
 	}
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read input %s: %w", path, err)
@@ -35,13 +36,19 @@ func readRegularFile(path string) ([]byte, error) {
 func scanInputs(ctx context.Context, root string) (inputs, error) {
 	result := inputs{root: root, files: map[string]string{}}
 	result.config = runtime.Version() + "|" + runtime.GOOS + "|" + runtime.GOARCH
-	for _, key := range []string{"GOOS", "GOARCH", "GOAMD64", "GOARM", "CGO_ENABLED", "CC", "CXX", "GOWORK", "GOROOT", "GOPATH", "GOMODCACHE", "GOEXPERIMENT"} {
+	for _, key := range []string{
+		"GOOS", "GOARCH", "GOAMD64", "GOARM",
+		"CGO_ENABLED", "CC", "CXX",
+		"GOWORK", "GOROOT", "GOPATH", "GOMODCACHE", "GOEXPERIMENT",
+	} {
 		result.config += "|" + key + "=" + os.Getenv(key)
 	}
+
 	if workspace := os.Getenv("GOWORK"); workspace != "" && workspace != "off" {
 		if !filepath.IsAbs(workspace) {
 			return result, fmt.Errorf("GOWORK must be an absolute path or off")
 		}
+
 		data, err := readRegularFile(workspace)
 		if err != nil {
 			return result, err
@@ -53,6 +60,7 @@ func scanInputs(ctx context.Context, root string) (inputs, error) {
 			return result, err
 		}
 	}
+
 	// Workspace configuration can be inherited from above the selected module.
 	for directory := filepath.Dir(root); ; directory = filepath.Dir(directory) {
 		for _, name := range []string{"go.work", "go.work.sum"} {
@@ -78,7 +86,10 @@ func scanInputs(ctx context.Context, root string) (inputs, error) {
 		if d.IsDir() && path != root && (d.Name() == ".git" || d.Name() == "vendor" || d.Name() == "node_modules") {
 			return filepath.SkipDir
 		}
-		if !d.IsDir() && (strings.HasSuffix(path, ".go") || d.Name() == "go.mod" || d.Name() == "go.sum" || d.Name() == "go.work" || d.Name() == "go.work.sum") {
+
+		if !d.IsDir() && (strings.HasSuffix(path, ".go") ||
+			d.Name() == "go.mod" || d.Name() == "go.sum" ||
+			d.Name() == "go.work" || d.Name() == "go.work.sum") {
 			data, err := readRegularFile(path)
 			if err != nil {
 				return err
@@ -90,12 +101,13 @@ func scanInputs(ctx context.Context, root string) (inputs, error) {
 		}
 		return nil
 	})
+
 	return result, err
 }
 
 // Publication rechecks both file membership and content after loading, then commits
 // cache metadata. A failed verification discards tentative cache changes entirely.
-func (e *Engine) publish(ctx context.Context, input inputs, b Batch) (Batch, error) {
+func (e *Engine) publish(ctx context.Context, input inputs, batch Batch) (Batch, error) {
 	current, err := scanInputs(ctx, input.root)
 	if err != nil || current.config != input.config || !maps.Equal(current.files, input.files) {
 		*e = Engine{}
@@ -108,15 +120,17 @@ func (e *Engine) publish(ctx context.Context, input inputs, b Batch) (Batch, err
 	e.config = input.config
 	e.files = input.files
 	e.complete = true
-	for _, diagnostic := range b.Diagnostics {
+
+	for _, diagnostic := range batch.Diagnostics {
 		if diagnostic.Severity == "error" {
 			e.complete = false
 		}
 	}
 	if !e.complete {
-		b.Snapshot = "incomplete:" + b.Snapshot
+		batch.Snapshot = "incomplete:" + batch.Snapshot
 	}
-	return b, nil
+
+	return batch, nil
 }
 
 func (input inputs) readSource(path string) ([]byte, error) {

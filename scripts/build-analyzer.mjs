@@ -5,10 +5,14 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const host = execFileSync('rustc', ['-vV'], { encoding: 'utf8' }).match(/^host: (.+)$/m)?.[1];
-if (!host) throw new Error('rustc did not report its host target');
+if (!host) {
+  throw new Error('rustc did not report its host target');
+}
+
 const suffix = process.platform === 'win32' ? '.exe' : '';
 const directory = resolve(root, 'src-tauri/binaries');
 mkdirSync(directory, { recursive: true });
+
 execFileSync(
   'go',
   [
