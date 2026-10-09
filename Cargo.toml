@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/sonar-core"]
+members = ["crates/sonar-core", "src-tauri"]
 default-members = ["crates/sonar-core"]
 resolver = "2"
 

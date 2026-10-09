@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "Local graph window. File and process access stay in the Rust backend.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
