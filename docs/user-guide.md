@@ -22,9 +22,11 @@ The initial relationship choices depend on the symbol. Functions start with outg
 
 Choose a question to set the view:
 
-- **What does this call?** shows outgoing call relationships.
-- **Who calls this?** shows incoming call relationships.
-- **How does this work?** starts following the function's internal flow.
+- **Calls** shows outgoing call relationships.
+- **Callers** shows incoming call relationships.
+- **Flow** opens the function's behavior overview without starting or restarting a walkthrough.
+
+Fields offer **Readers** and **Writers**. Types offer **Construction**, **Methods**, and **Uses**. Methods shows method declarations that use the type, including receivers and signatures. Relationship preferences are remembered separately for functions, fields, types, and values during the session.
 
 You can also set incoming, outgoing, or both directions and toggle relationship categories. A filter changes the view, not the source or index. Clearing all categories hides external relationships.
 
@@ -32,19 +34,21 @@ Select a symbol and use **Expand neighbors** to reveal another level. **Collapse
 
 Connections with the same endpoints and relationship kind summarize repeated source sites. Inspect the connection to see its expressions and locations. A neighbor page counts these grouped connections, not individual call occurrences or necessarily distinct symbols.
 
-Use package and relationship groups to narrow a crowded view, then **Show all packages** to remove the group filter. **Previous neighbors** and **Next neighbors** reveal other pages. Counts distinguish connections hidden by filters, collapse, pagination, and view limits. Hidden counts are not proof of missing code, and a small visible graph is not the full set of known relationships.
+Use package and relationship groups to narrow one symbol's neighbors. The action names the direction, relationship, and package; other expansion seeds keep their filters. Remove its filter chip above the graph, or use **Show all packages** in the inspector, to restore the global filters. **Previous neighbors** and **Next neighbors** reveal other pages. Counts distinguish connections hidden by filters, collapse, pagination, and view limits. Hidden counts are not proof of missing code, and a small visible graph is not the full set of known relationships.
 
 ## Keep your place
 
-Expansion preserves the viewport. Use **Center focus** to return to the focused declaration and **Show selected node** to locate the current selection. Fit the graph explicitly when you want an overview; a large overview may shrink labels.
+Expansion preserves the viewport. Following flow preserves zoom and pans only when the next operation leaves the comfortable visible area. Enable **Keep current step centered** for automatic centering at your chosen zoom. Use **Center focus** to return to the focused declaration and **Show selected node** to locate the current selection. Fit the graph explicitly when you want an overview; a large overview may shrink labels.
 
-**Back** and **Forward** restore earlier exploration context, including selection and viewport. Hover over a node for its identity card, or pin the details to keep them open. The card shows the signature, package, and source location when available. Type-resolved signatures can differ from the declaration's spelling.
+**Back** and **Forward** restore earlier exploration context, including selection and viewport. The context line distinguishes the explored declaration, followed operation, returned call, and current inspection. **Return to current step** selects the followed operation again.
+
+Selection updates an open inspector. Use **Inspect** to open a closed inspector and **Close inspector** to reclaim its space. Selecting or stepping through nodes keeps it closed. Connection summaries, reset actions, and pagination are available above the graph without opening the inspector. Hover over a node for its identity card, or pin the details to keep them open. The card shows the signature, package, and source location when available. Type-resolved signatures can differ from the declaration's spelling.
 
 ## Follow a function
 
-Select a function or method and choose **Open behavior** to reveal internal operations inside its function group. **Follow flow** starts at the analyzed entry. The current operation and available successors appear in the flow controls.
+Select a function or method and choose **Open behavior** to reveal internal operations inside its function group. **Start walkthrough** starts at the analyzed entry. **Pause walkthrough** keeps your progress, **Resume walkthrough** continues it, and **Restart walkthrough** explicitly returns to the entry. **Stop following** discards the path without closing the graph. Selecting Flow again preserves progress. Selecting a relationship question pauses the walkthrough; Resume reopens it at the saved operation. The current operation and available successors appear in the flow controls.
 
-At a condition, choose the labelled branch. The chosen conditions remain visible. At a supported loop, use **Follow body** or **Follow exit**. **Step backward** revisits the prior step; **Stop following** ends the path selection.
+At a condition, choose the labelled branch. The chosen conditions remain visible. At a supported loop, use **Follow body** or **Follow exit**. **Step backward** revisits the prior step.
 
 Long functions use collapsed regions and explicit boundaries. **Reveal region** or **Reveal next region** opens more detail. If a boundary is unsupported, inspect its limitation rather than assuming a continuation. The view has a shared node budget, so refocusing or collapsing other detail can free room.
 
@@ -90,7 +94,7 @@ Syntax and type errors can make the snapshot incomplete and remove affected stal
 
 ## Keyboard inspection
 
-Use Tab to reach the controls and **Inspect the graph with the keyboard** to select a visible operation, symbol, or connection. The inspector exposes the corresponding actions and evidence. Escape dismisses identity details and the current inspection selection.
+Use Tab to reach the controls and **Inspect the graph with the keyboard** to select a visible operation, symbol, or connection. The inspector exposes the corresponding actions and evidence. Escape dismisses identity details and the inspection selection. Use **Close inspector** to close the panel.
 
 Keyboard controls exist in the current source. Full keyboard usability remains a proposed acceptance check, not a completed accessibility audit.
 

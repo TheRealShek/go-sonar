@@ -18,6 +18,11 @@ export function FlowNavigator({
   onOutcomePage,
   onReturn,
   onStop,
+  busy,
+  keepStepCentered,
+  onKeepStepCentered,
+  onResume,
+  onPause,
 }: {
   view?: GraphView;
   request?: GraphRequest;
@@ -35,10 +40,16 @@ export function FlowNavigator({
   onOutcomePage: (id: string, offset: number) => void;
   onReturn: () => void;
   onStop: () => void;
+  busy: boolean;
+  keepStepCentered: boolean;
+  onKeepStepCentered: (value: boolean) => void;
+  onResume: () => void;
+  onPause: () => void;
 }) {
   if (!view || !request) return null;
-  const functionId = trail?.functionId ?? inspectedFunctionId ?? request.focus;
+  const functionId = inspectedFunctionId ?? trail?.functionId ?? request.focus;
   const behavior = view.behaviors?.find((item) => item.symbolId === functionId);
+  if (!behavior && !trail && !calls.length) return null;
   const current = view.nodes.find((node) => node.id === trail?.steps.at(-1)?.nodeId);
   const next = current ? successors(view, current.id) : [];
   return (
@@ -53,7 +64,9 @@ export function FlowNavigator({
                 : ''}
             </span>
           ))}
-          <button onClick={onReturn}>Return to caller</button>
+          <button disabled={busy} onClick={onReturn}>
+            Return to caller
+          </button>
         </div>
       )}
       {(trail || outcomeId) && (
@@ -64,8 +77,7 @@ export function FlowNavigator({
       )}
       {continuationCallId && (
         <p className="notice">
-          Returned to the original call occurrence. Highlighted control edges show its immediate
-          continuation.{' '}
+          Returned to the original call occurrence.{' '}
           {trail &&
             trail.steps.at(-1)?.nodeId !== continuationCallId &&
             'The followed path remains at its previous operation.'}
@@ -77,10 +89,49 @@ export function FlowNavigator({
           entry-to-return comparison.
         </p>
       )}
+      {(behavior?.entryId || trail) && (
+        <div className="actions" aria-label="Walkthrough actions">
+          {behavior?.entryId && trail?.functionId !== functionId && (
+            <button disabled={busy} onClick={() => onStart(functionId)}>
+              Start walkthrough
+            </button>
+          )}
+          {trail && (
+            <>
+              {trail.paused && (
+                <button disabled={busy} onClick={onResume}>
+                  Resume walkthrough
+                </button>
+              )}
+              <button disabled={busy} onClick={() => onStart(trail.functionId)}>
+                Restart walkthrough
+              </button>
+              {!trail.paused && (
+                <button disabled={busy} onClick={onPause}>
+                  Pause walkthrough
+                </button>
+              )}
+              <button disabled={busy} onClick={onStop}>
+                Stop following
+              </button>
+            </>
+          )}
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={keepStepCentered}
+              onChange={(event) => onKeepStepCentered(event.target.checked)}
+            />
+            Keep current step centered
+          </label>
+        </div>
+      )}
       {trail && (
         <>
           <div className="flow-current" role="status">
-            <strong>Current: {current?.name ?? 'Hidden operation'}</strong>
+            <strong>
+              {trail.paused ? 'Paused' : 'Following'}: {current?.name ?? 'Hidden operation'}
+            </strong>
             <span>
               Step {trail.steps.length} / {MAX_FLOW_STEPS}
             </span>
@@ -97,16 +148,18 @@ export function FlowNavigator({
             </ol>
           )}
           <div className="actions">
-            <button disabled={trail.steps.length <= 1} onClick={onBack}>
+            <button disabled={busy || trail.paused || trail.steps.length <= 1} onClick={onBack}>
               Step backward
             </button>
             {current && ['region', 'boundary'].includes(current.kind) ? (
-              <button onClick={() => onReveal(current)}>Reveal next region</button>
+              <button disabled={busy || trail.paused} onClick={() => onReveal(current)}>
+                Reveal next region
+              </button>
             ) : (
               next.map((edge) => (
                 <button
                   key={edge.id}
-                  disabled={trail.steps.length >= MAX_FLOW_STEPS}
+                  disabled={busy || trail.paused || trail.steps.length >= MAX_FLOW_STEPS}
                   onClick={() => onStep(edge)}
                 >
                   {current?.kind === 'loop'
@@ -120,7 +173,6 @@ export function FlowNavigator({
                 </button>
               ))
             )}
-            <button onClick={onStop}>Stop following</button>
           </div>
           {current?.details?.limitation && <p className="notice">{current.details.limitation}</p>}
           {!next.length && current && !['region', 'boundary'].includes(current.kind) && (
@@ -140,6 +192,11 @@ export function FlowNavigator({
         </>
       )}
       {behavior && (
+        <p>
+          Behavior overview: {view.nodes.find((node) => node.id === functionId)?.name ?? functionId}
+        </p>
+      )}
+      {behavior && (
         <details className="outcomes" open={!!outcomeId}>
           <summary>
             What can this return? · {behavior.returnCount} analyzed return statements
@@ -148,6 +205,7 @@ export function FlowNavigator({
             <button
               key={node.id}
               className={`match ${outcomeId === node.id ? 'active' : ''}`}
+              disabled={busy}
               onClick={() => onOutcome(node)}
             >
               <code>{node.details?.expression ?? node.name}</code>
@@ -156,13 +214,15 @@ export function FlowNavigator({
           ))}
           <div className="actions">
             <button
-              disabled={behavior.returnOffset === 0}
+              disabled={busy || behavior.returnOffset === 0}
               onClick={() => onOutcomePage(functionId, Math.max(0, behavior.returnOffset - 30))}
             >
               Previous returns
             </button>
             <button
-              disabled={behavior.returnOffset + behavior.returns.length >= behavior.returnCount}
+              disabled={
+                busy || behavior.returnOffset + behavior.returns.length >= behavior.returnCount
+              }
               onClick={() => onOutcomePage(functionId, behavior.returnOffset + 30)}
             >
               More returns
@@ -191,9 +251,6 @@ export function FlowNavigator({
           No local behavior is available for this declaration. Inspect a local call site or the
           declared contract.
         </p>
-      )}
-      {!trail && behavior?.entryId && (
-        <button onClick={() => onStart(functionId)}>Follow flow</button>
       )}
     </div>
   );

@@ -597,8 +597,51 @@ summary:focus-visible {
 .graph-toolbar {
   flex-wrap: wrap;
 }
+.app.inspector-closed .workspace {
+  grid-template-columns: 240px minmax(0, 1fr);
+}
+.exploration-context,
+.connection-summary {
+  padding: 8px 12px;
+  border-bottom: 1px solid #ced7e1;
+  background: #fff;
+  overflow-wrap: anywhere;
+}
+.exploration-context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.exploration-context span + span::before {
+  content: '· ';
+}
+.connection-summary p {
+  margin: 6px 0;
+}
+.filter-chip,
+.questions button[aria-pressed='true'] {
+  border-color: #348ac6;
+  background: #e9f3ff;
+}
+.connection-summary .actions,
+.flow-navigation .actions {
+  align-items: center;
+}
+.connection-summary details {
+  margin-top: 6px;
+}
 @media (max-width: 1050px) {
+  .app.inspector-closed .workspace {
+    grid-template-columns: 205px minmax(0, 1fr);
+  }
   .wide-source .workspace {
     grid-template-columns: 190px minmax(250px, 1fr) 360px;
+  }
+}
+@media (max-width: 750px) {
+  .app.inspector-closed .workspace,
+  .app.wide-source .workspace {
+    grid-template-columns: 180px minmax(0, 1fr);
   }
 }

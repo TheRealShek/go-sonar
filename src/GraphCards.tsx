@@ -59,12 +59,14 @@ export function IdentityCard({
   pinned,
   onPin,
   onDismiss,
+  onInspect,
 }: {
   value: ViewNode | ViewEdge;
   nodes: ViewNode[];
   pinned: boolean;
   onPin: () => void;
   onDismiss: () => void;
+  onInspect: () => void;
 }) {
   const node = 'name' in value ? value : undefined;
   const source = node?.source ?? (value as ViewEdge).evidence;
@@ -109,6 +111,7 @@ export function IdentityCard({
       <small>{formatSource(source)}</small>
       {!node && <p>Static source relationship. It does not establish observed execution.</p>}
       <button onClick={onPin}>{pinned ? 'Details pinned' : 'Pin details'}</button>
+      <button onClick={onInspect}>Inspect</button>
     </section>
   );
 }

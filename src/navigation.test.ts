@@ -10,6 +10,7 @@ import {
   canEnterCall,
   followEdge,
   focusViewport,
+  operationViewport,
   MAX_FLOW_STEPS,
   outcomePaths,
   revealRegion,
@@ -128,6 +129,41 @@ describe('static path navigation', () => {
   });
 });
 
+describe('walkthrough viewport', () => {
+  const canvas = { width: 800, height: 600 };
+  const viewport = { x: 20, y: -30, zoom: 0.5 };
+  it('keeps zoom and pan when the whole operation is comfortably visible', () => {
+    expect(operationViewport(viewport, { x: 200, y: 250, width: 220, height: 88 }, canvas)).toEqual(
+      viewport,
+    );
+  });
+  it.each([
+    { x: -100, y: 250, expectedX: 130, expectedY: -30 },
+    { x: 1400, y: 250, expectedX: -90, expectedY: -30 },
+    { x: 200, y: 0, expectedX: 20, expectedY: 80 },
+    { x: 200, y: 1200, expectedX: 20, expectedY: -124 },
+  ])(
+    'pans only the necessary axis for an operation at $x, $y',
+    ({ x, y, expectedX, expectedY }) => {
+      expect(operationViewport(viewport, { x, y, width: 220, height: 88 }, canvas)).toEqual({
+        x: expectedX,
+        y: expectedY,
+        zoom: 0.5,
+      });
+    },
+  );
+  it('centers on request while keeping the chosen zoom', () => {
+    expect(
+      operationViewport(viewport, { x: 200, y: 250, width: 220, height: 88 }, canvas, true),
+    ).toEqual({ x: 245, y: 153, zoom: 0.5 });
+  });
+  it('centers an oversized operation without zooming out', () => {
+    expect(
+      operationViewport({ x: 0, y: 0, zoom: 2 }, { x: 0, y: 0, width: 500, height: 400 }, canvas),
+    ).toEqual({ x: -100, y: -100, zoom: 2 });
+  });
+});
+
 describe('readable exploration defaults', () => {
   it('starts with eight outgoing targets and preserves explicit preferences', () => {
     expect(requestFor('get')).toMatchObject({
@@ -182,11 +218,12 @@ describe('navigation across disclosure, calls, and snapshots', () => {
       nodeId: 'later',
     });
   });
-  it('highlights the entered call continuation after returning to an unrelated trail', async () => {
+  it('keeps the graph highlight aligned with the walkthrough after returning from another call', async () => {
     const view = await behavior();
     const id = currentOperation(trail, 'normalizing');
-    expect(id).toBe('normalizing');
-    expect(successors(view, id!).map((e) => e.target)).toEqual(['normalized']);
+    expect(id).toBe('entry');
+    expect(successors(view, id!).map((e) => e.target)).toEqual(['lookup']);
+    expect(currentOperation(undefined, 'normalizing')).toBe('normalizing');
     expect(currentOperation(trail)).toBe('entry');
   });
   it('rejects saved frames after the same occurrence ID is reused in a new snapshot', () => {

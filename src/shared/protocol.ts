@@ -99,6 +99,7 @@ export interface GraphRequest {
   direction?: 'incoming' | 'outgoing' | 'both';
   offsets?: Record<string, number>;
   neighborLimit?: number;
+  neighborKind?: 'method';
   groups?: Record<string, NeighborFilter>;
   regions?: string[];
   behaviorAnchors?: Record<string, string>;

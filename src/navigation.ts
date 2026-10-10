@@ -14,6 +14,31 @@ export interface FlowStep {
 export interface FlowTrail {
   functionId: string;
   steps: FlowStep[];
+  paused?: boolean;
+}
+
+// Keep the entire operation inside a comfortable area, moving only the necessary axis.
+export function operationViewport(
+  viewport: Viewport,
+  node: { x: number; y: number; width: number; height: number },
+  canvas: { width: number; height: number },
+  centered = false,
+): Viewport {
+  const axis = (pan: number, position: number, size: number, extent: number) => {
+    const start = pan + position * viewport.zoom;
+    const length = size * viewport.zoom;
+    const padding = Math.min(80, extent * 0.15);
+    if (centered || length > extent - padding * 2)
+      return extent / 2 - (position + size / 2) * viewport.zoom;
+    if (start < padding) return pan + padding - start;
+    if (start + length > extent - padding) return pan + extent - padding - start - length;
+    return pan;
+  };
+  return {
+    x: axis(viewport.x, node.x, node.width, canvas.width),
+    y: axis(viewport.y, node.y, node.height, canvas.height),
+    zoom: viewport.zoom,
+  };
 }
 export interface NavigationFrame {
   snapshot: string;
@@ -21,6 +46,7 @@ export interface NavigationFrame {
   selectedId?: string;
   viewport?: Viewport;
   trail?: FlowTrail;
+  overviewFunctionId?: string;
   outcomeId?: string;
   calls?: CallFrame[];
   continuationCallId?: string;
@@ -218,7 +244,7 @@ export function currentOperation(
   trail?: FlowTrail,
   continuationCallId?: string,
 ): string | undefined {
-  return continuationCallId ?? trail?.steps.at(-1)?.nodeId;
+  return trail?.steps.at(-1)?.nodeId ?? continuationCallId;
 }
 
 export function frameMatchesSnapshot(

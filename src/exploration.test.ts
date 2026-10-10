@@ -6,12 +6,78 @@ import {
   validateView,
   VIEW_LIMIT,
   neighborPage,
+  categoryFor,
+  QUESTIONS,
+  revealGroup,
+  clearGroup,
 } from './exploration';
 import { sampleBackend } from './sample';
 import { calculateLayout } from './layout/engine';
 import ELK from 'elkjs/lib/elk.bundled.js';
 
 const testElk = new ELK();
+
+describe('declaration questions and local disclosure', () => {
+  it('offers questions for each declaration category', () => {
+    expect(QUESTIONS[categoryFor('field')].map((question) => question.label)).toEqual([
+      'Readers',
+      'Writers',
+    ]);
+    expect(QUESTIONS[categoryFor('struct')].map((question) => question.label)).toEqual([
+      'Construction',
+      'Methods',
+      'Uses',
+    ]);
+    expect(categoryFor('method')).toBe('function');
+    expect(categoryFor('interface')).toBe('type');
+    expect(requestFor('field', 'field')).toMatchObject({
+      kinds: ['reads', 'writes'],
+      direction: 'incoming',
+    });
+  });
+  it('reveals a local group while retaining global preferences and other seed filters', async () => {
+    const request = {
+      ...requestFor('get'),
+      expanded: ['normalize'],
+      groups: { normalize: { packageId: 'sample/catalog', kind: 'calls', direction: 'incoming' } },
+    };
+    const next = revealGroup(request, 'get', {
+      packageId: 'sample/catalog',
+      kind: 'reads',
+      direction: 'outgoing',
+    });
+    expect(next.kinds).toEqual(['calls']);
+    expect(next.direction).toBe('outgoing');
+    expect(next.groups?.normalize).toEqual(request.groups.normalize);
+    expect(request.groups).not.toHaveProperty('get');
+    const view = await sampleBackend.graph(next);
+    expect(view.edges.some((edge) => edge.id === 'get-cache')).toBe(true);
+    expect(view.edges.some((edge) => edge.id === 'get-load')).toBe(false);
+    const cleared = clearGroup(next, 'get');
+    expect(cleared.groups).toEqual(request.groups);
+    expect((await sampleBackend.graph(cleared)).edges.some((edge) => edge.id === 'get-load')).toBe(
+      true,
+    );
+  });
+  it('pages grouped connections without dropping repeated source evidence', async () => {
+    const request = { ...requestFor('get'), direction: 'both' as const, neighborLimit: 1 };
+    const first = await sampleBackend.graph(request);
+    const summary = first.summaries.find((summary) => summary.nodeId === 'get')!;
+    expect(summary.hasMore).toBe(true);
+    const next = await sampleBackend.graph(neighborPage(request, 'get', summary, 'next'));
+    expect(next.edges).toHaveLength(1);
+    expect(next.edges[0].id).not.toBe(first.edges[0].id);
+    const incoming = await sampleBackend.graph({ ...request, direction: 'incoming' });
+    expect(incoming.edges[0].siteCount).toBe(2);
+    expect(incoming.edges[0].sites).toHaveLength(2);
+    for (const view of [first, next, incoming]) {
+      const summary = view.summaries.find((summary) => summary.nodeId === 'get')!;
+      expect(summary.hidden).toBe(
+        summary.filtered! + summary.collapsed! + summary.paginated! + summary.limited!,
+      );
+    }
+  });
+});
 
 describe('bounded disclosure', () => {
   it('starts collapsed and only opens requested behavior', async () => {

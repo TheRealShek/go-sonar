@@ -243,36 +243,55 @@ function view(request: GraphRequest): GraphView {
   const ids = new Set([request.focus]);
   const selected: ViewEdge[] = [];
 
-  for (const id of new Set([request.focus, ...request.expanded])) {
-    for (const relation of relations) {
-      const direction = request.direction ?? 'both';
-      const visibleRelation =
-        request.kinds.includes(relation.kind) &&
-        ((direction !== 'incoming' && relation.source === id) ||
-          (direction !== 'outgoing' && relation.target === id));
-
-      if (visibleRelation) {
-        ids.add(relation.source);
-        ids.add(relation.target);
-        const connection = selected.find(
-          (edge) =>
-            edge.source === relation.source &&
-            edge.target === relation.target &&
-            edge.kind === relation.kind,
-        );
-        const site = {
-          id: relation.id,
-          expression: relation.expression ?? relation.label,
-          evidence: relation.evidence,
-          certainty: relation.certainty,
-        };
-        if (!connection) selected.push({ ...relation, sites: [site], siteCount: 1 });
-        else if (!connection.sites?.some((value) => value.id === site.id)) {
-          connection.sites!.push(site);
-          connection.siteCount = connection.sites!.length;
-          connection.label = `${relation.kind} · ${connection.siteCount} source sites`;
-        }
+  const seeds = new Set([request.focus, ...request.expanded]);
+  const pageSize = Math.max(1, Math.min(40, request.neighborLimit ?? 8));
+  const pages = new Map<string, ViewEdge[]>();
+  const allowed = (relation: ViewEdge, id: string) => {
+    const group = request.groups?.[id];
+    const direction = group?.direction || request.direction || 'both';
+    const kinds = group?.kind ? [group.kind] : request.kinds;
+    const other = symbols.find(
+      (symbol) => symbol.id === (relation.source === id ? relation.target : relation.source),
+    );
+    return (
+      kinds.includes(relation.kind) &&
+      ((direction !== 'incoming' && relation.source === id) ||
+        (direction !== 'outgoing' && relation.target === id)) &&
+      (!group?.packageId || other?.packageId === group.packageId) &&
+      (id !== request.focus ||
+        group ||
+        !request.neighborKind ||
+        other?.kind === request.neighborKind)
+    );
+  };
+  for (const id of seeds) {
+    const connections: ViewEdge[] = [];
+    for (const relation of relations.filter((relation) => allowed(relation, id))) {
+      const connection = connections.find(
+        (edge) =>
+          edge.source === relation.source &&
+          edge.target === relation.target &&
+          edge.kind === relation.kind,
+      );
+      const site = {
+        id: relation.id,
+        expression: relation.expression ?? relation.label,
+        evidence: relation.evidence,
+        certainty: relation.certainty,
+      };
+      if (!connection) connections.push({ ...relation, sites: [site], siteCount: 1 });
+      else {
+        connection.sites!.push(site);
+        connection.siteCount = connection.sites!.length;
+        connection.label = `${relation.kind} · ${connection.siteCount} source sites`;
       }
+    }
+    pages.set(id, connections);
+    const offset = request.offsets?.[id] ?? 0;
+    for (const connection of connections.slice(offset, offset + pageSize)) {
+      ids.add(connection.source);
+      ids.add(connection.target);
+      if (!selected.some((edge) => edge.id === connection.id)) selected.push(connection);
     }
   }
 
@@ -295,12 +314,13 @@ function view(request: GraphRequest): GraphView {
   const truncated = nodes.length > request.limit;
   nodes = nodes.slice(0, request.limit);
   const shown = new Set(nodes.map((node) => node.id));
+  const visibleEdges = selected.filter((edge) => shown.has(edge.source) && shown.has(edge.target));
 
   return {
     snapshot: 'sample-v1',
     focus: request.focus,
     nodes,
-    edges: selected.filter((edge) => shown.has(edge.source) && shown.has(edge.target)),
+    edges: visibleEdges,
     summaries: nodes
       .filter((node) => !node.parentId)
       .map((node) => {
@@ -308,24 +328,52 @@ function view(request: GraphRequest): GraphView {
           (edge) => edge.source === node.id || edge.target === node.id,
         );
 
+        const hidden = connected.filter(
+          (edge) => !visibleEdges.some((value) => value.sites?.some((site) => site.id === edge.id)),
+        );
+        const group = request.groups?.[node.id];
+        const groupMatches = (edge: ViewEdge) =>
+          !group ||
+          ((!group.kind || group.kind === edge.kind) &&
+            (!group.direction ||
+              group.direction === (edge.source === node.id ? 'outgoing' : 'incoming')) &&
+            (!group.packageId || group.packageId === 'sample/catalog'));
+        const filtered = hidden.filter((edge) => {
+          if (group && groupMatches(edge)) return false;
+          const direction = request.direction || 'both';
+          const kinds = request.kinds;
+          const other = symbols.find(
+            (symbol) => symbol.id === (edge.source === node.id ? edge.target : edge.source),
+          );
+          return (
+            !kinds.includes(edge.kind) ||
+            (direction === 'incoming' && edge.source === node.id) ||
+            (direction === 'outgoing' && edge.target === node.id) ||
+            (node.id === request.focus &&
+              !group &&
+              !!request.neighborKind &&
+              other?.kind !== request.neighborKind)
+          );
+        }).length;
+        const collapsed = Math.min(
+          hidden.length - filtered,
+          hidden.filter((edge) => !seeds.has(node.id) || (!!group && !groupMatches(edge))).length,
+        );
         return {
           nodeId: node.id,
+          sourceSites: connected.length,
+          pageOffset: seeds.has(node.id) ? (request.offsets?.[node.id] ?? 0) : undefined,
+          pageSize: seeds.has(node.id) ? pageSize : undefined,
+          hasMore: (pages.get(node.id)?.length ?? 0) > (request.offsets?.[node.id] ?? 0) + pageSize,
           incoming: connected.filter((edge) => edge.target === node.id).length,
           outgoing: connected.filter((edge) => edge.source === node.id).length,
-          hidden: connected.filter(
-            (edge) => !selected.some((value) => value.sites?.some((site) => site.id === edge.id)),
-          ).length,
+          hidden: hidden.length,
           distinctSymbols: new Set(
             connected.map((edge) => (edge.source === node.id ? edge.target : edge.source)),
           ).size,
-          filtered: connected.filter(
-            (edge) =>
-              !request.kinds.includes(edge.kind) ||
-              (request.direction === 'outgoing' && edge.target === node.id) ||
-              (request.direction === 'incoming' && edge.source === node.id),
-          ).length,
-          collapsed: 0,
-          paginated: 0,
+          filtered,
+          collapsed,
+          paginated: Math.max(0, hidden.length - filtered - collapsed),
           limited: 0,
           groups: [
             ...new Set(
@@ -349,9 +397,13 @@ function view(request: GraphRequest): GraphView {
                 edges.map((edge) => (edge.source === node.id ? edge.target : edge.source)),
               ).size,
               visible: edges.filter((edge) =>
-                selected.some((value) => value.sites?.some((site) => site.id === edge.id)),
+                visibleEdges.some((value) => value.sites?.some((site) => site.id === edge.id)),
               ).length,
-              filtered: !request.kinds.includes(kind),
+              filtered:
+                !(group?.kind ? [group.kind] : request.kinds).includes(kind) ||
+                (!!(group?.direction || request.direction) &&
+                  (group?.direction || request.direction) !== 'both' &&
+                  (group?.direction || request.direction) !== direction),
             };
           }),
         };
