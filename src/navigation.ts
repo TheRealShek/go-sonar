@@ -14,6 +14,31 @@ export interface FlowStep {
 export interface FlowTrail {
   functionId: string;
   steps: FlowStep[];
+  paused?: boolean;
+}
+
+// Keep the entire operation inside a comfortable area, moving only the necessary axis.
+export function operationViewport(
+  viewport: Viewport,
+  node: { x: number; y: number; width: number; height: number },
+  canvas: { width: number; height: number },
+  centered = false,
+): Viewport {
+  const axis = (pan: number, position: number, size: number, extent: number) => {
+    const start = pan + position * viewport.zoom;
+    const length = size * viewport.zoom;
+    const padding = Math.min(80, extent * 0.15);
+    if (centered || length > extent - padding * 2)
+      return extent / 2 - (position + size / 2) * viewport.zoom;
+    if (start < padding) return pan + padding - start;
+    if (start + length > extent - padding) return pan + extent - padding - start - length;
+    return pan;
+  };
+  return {
+    x: axis(viewport.x, node.x, node.width, canvas.width),
+    y: axis(viewport.y, node.y, node.height, canvas.height),
+    zoom: viewport.zoom,
+  };
 }
 export interface NavigationFrame {
   snapshot: string;
@@ -21,6 +46,9 @@ export interface NavigationFrame {
   selectedId?: string;
   viewport?: Viewport;
   trail?: FlowTrail;
+  overviewFunctionId?: string;
+  focusLabel?: string;
+  focusLine?: number;
   outcomeId?: string;
   calls?: CallFrame[];
   continuationCallId?: string;
@@ -108,6 +136,73 @@ export function canEnterCall(node: ViewNode): boolean {
   return (
     node.kind === 'call' && !!node.relatedSymbolId && node.details?.call?.dispatch === 'direct'
   );
+}
+
+export function explorationDestination(frame?: NavigationFrame): string {
+  if (!frame) return 'No saved exploration';
+  return `${frame.focusLabel ?? frame.request.focus}${frame.focusLine ? ` · line ${frame.focusLine}` : ''}${frame.trail ? ` · step ${frame.trail.steps.length}` : ''}`;
+}
+
+// Consecutive changes to the same focus belong to one breadcrumb. Restore its last saved context.
+export function explorationBreadcrumbs(
+  history: NavigationFrame[],
+  focus?: string,
+): { frame: NavigationFrame; index: number }[] {
+  const breadcrumbs: { frame: NavigationFrame; index: number }[] = [];
+  for (const [index, frame] of history.entries()) {
+    if (breadcrumbs.at(-1)?.frame.request.focus === frame.request.focus) breadcrumbs.pop();
+    breadcrumbs.push({ frame, index });
+  }
+  if (breadcrumbs.at(-1)?.frame.request.focus === focus) breadcrumbs.pop();
+  return breadcrumbs.slice(-7);
+}
+
+// Collapse this declaration's disclosure only. Shared neighbors can remain through other branches.
+export function collapseBranch(request: GraphRequest, node: ViewNode): GraphRequest {
+  const id = node.parentId ?? node.id;
+  const without = <T>(values: Record<string, T> | undefined) =>
+    Object.fromEntries(Object.entries(values ?? {}).filter(([key]) => key !== id));
+  return {
+    ...request,
+    expanded: request.expanded.filter((seed) => seed !== id),
+    internals: request.internals.filter((seed) => seed !== id),
+    offsets: without(request.offsets),
+    groups: without(request.groups),
+    regions: (request.regions ?? []).filter((region) => !region.startsWith(`${id}/behavior/`)),
+    behaviorAnchors: without(request.behaviorAnchors),
+    outcomeOffsets: without(request.outcomeOffsets),
+  };
+}
+
+export function resetToFocus(request: GraphRequest): GraphRequest {
+  return {
+    ...request,
+    expanded: [],
+    internals: [],
+    offsets: {},
+    groups: {},
+    regions: [],
+    behaviorAnchors: {},
+    outcomeOffsets: {},
+  };
+}
+
+// A new behavior window can replace source operations even when flow requested it implicitly.
+export function replacedOperations(previous: GraphView | undefined, next: GraphView) {
+  if (!previous || previous.focus !== next.focus) return { count: 0, functions: [] as string[] };
+  const open = new Set(next.behaviors?.map((behavior) => behavior.symbolId));
+  const visible = new Set(next.nodes.map((node) => node.id));
+  const removed = previous.nodes.filter(
+    (node) =>
+      node.parentId &&
+      open.has(node.parentId) &&
+      !['region', 'boundary'].includes(node.kind) &&
+      !visible.has(node.id),
+  );
+  const functions = [...new Set(removed.map((node) => node.parentId!))].map(
+    (id) => next.nodes.find((node) => node.id === id)?.name ?? id,
+  );
+  return { count: removed.length, functions };
 }
 
 export function revealRegion(request: GraphRequest, node: ViewNode): GraphRequest {
@@ -218,7 +313,7 @@ export function currentOperation(
   trail?: FlowTrail,
   continuationCallId?: string,
 ): string | undefined {
-  return continuationCallId ?? trail?.steps.at(-1)?.nodeId;
+  return trail?.steps.at(-1)?.nodeId ?? continuationCallId;
 }
 
 export function frameMatchesSnapshot(

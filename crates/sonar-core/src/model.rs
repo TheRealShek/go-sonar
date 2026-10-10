@@ -269,6 +269,8 @@ pub struct GraphRequest {
     #[serde(default = "default_neighbor_limit")]
     pub neighbor_limit: usize,
     #[serde(default)]
+    pub neighbor_kind: String,
+    #[serde(default)]
     pub groups: std::collections::HashMap<String, NeighborFilter>,
     #[serde(default)]
     pub regions: Vec<String>,

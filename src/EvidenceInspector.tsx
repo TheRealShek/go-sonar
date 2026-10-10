@@ -11,6 +11,7 @@ import type {
   SourceSpan,
   ViewEdge,
   ViewNode,
+  NeighborFilter,
 } from './shared/protocol';
 import { canEnterCall, MAX_CALL_DEPTH } from './navigation';
 
@@ -36,6 +37,8 @@ export function EvidenceInspector({
   onImpact,
   onPage,
   onShow,
+  onGroup,
+  onClearGroup,
 }: {
   selected?: ViewNode | ViewEdge;
   summary?: GraphSummary;
@@ -58,6 +61,8 @@ export function EvidenceInspector({
   onImpact: (id: string, category: string) => void;
   onPage: (direction: 'previous' | 'next') => void;
   onShow: (node: ViewNode) => void;
+  onGroup: (nodeId: string, group: NeighborFilter) => void;
+  onClearGroup: (nodeId: string) => void;
 }) {
   const [sites, setSites] = useState<RelationSite[]>([]);
   const [siteOffset, setSiteOffset] = useState(0);
@@ -184,7 +189,7 @@ export function EvidenceInspector({
                       {request?.internals.includes(node.id) ? 'Collapse behavior' : 'Open behavior'}
                     </button>
                     <button disabled={busy || !!impact} onClick={() => onFollow(node.id)}>
-                      Follow flow
+                      Flow overview
                     </button>
                   </>
                 )}
@@ -309,28 +314,16 @@ export function EvidenceInspector({
                           <button
                             disabled={busy || !!impact}
                             onClick={() =>
-                              onChange({
-                                expanded:
-                                  node.id === request?.focus || request?.expanded.includes(node.id)
-                                    ? request?.expanded
-                                    : [...(request?.expanded ?? []).slice(-19), node.id],
-                                kinds: request?.kinds.includes(group.kind)
-                                  ? request.kinds
-                                  : [...(request?.kinds ?? []), group.kind],
-                                direction: group.direction as GraphRequest['direction'],
-                                groups: {
-                                  ...request?.groups,
-                                  [node.id]: {
-                                    packageId: group.packageId,
-                                    kind: group.kind,
-                                    direction: group.direction,
-                                  },
-                                },
-                                offsets: { ...request?.offsets, [node.id]: 0 },
+                              onGroup(node.id, {
+                                packageId: group.packageId,
+                                kind: group.kind,
+                                direction: group.direction,
                               })
                             }
                           >
-                            Reveal this group
+                            Show only {group.direction} {group.kind.replace('_', ' ')}{' '}
+                            {group.direction === 'incoming' ? 'from' : 'to'} {group.packageId} for{' '}
+                            {node.name}
                           </button>
                         </div>
                       ))}
@@ -341,18 +334,7 @@ export function EvidenceInspector({
                         </p>
                       )}
                       {request?.groups?.[node.id] && (
-                        <button
-                          onClick={() =>
-                            onChange({
-                              groups: Object.fromEntries(
-                                Object.entries(request.groups ?? {}).filter(
-                                  ([id]) => id !== node.id,
-                                ),
-                              ),
-                              offsets: { ...request.offsets, [node.id]: 0 },
-                            })
-                          }
-                        >
+                        <button disabled={busy || !!impact} onClick={() => onClearGroup(node.id)}>
                           Show all packages
                         </button>
                       )}

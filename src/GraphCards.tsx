@@ -10,6 +10,7 @@ export type SymbolNode = Node<{
   role?: string;
   join?: boolean;
   limitation?: string;
+  newlyRevealed?: boolean;
 }>;
 
 export function SymbolCard({ data }: NodeProps<SymbolNode>) {
@@ -25,6 +26,7 @@ export function SymbolCard({ data }: NodeProps<SymbolNode>) {
           {data.role ?? data.kind}
           {data.grouped ? ' · static behavior' : ''}
           {data.join ? ' · join' : ''}
+          {data.newlyRevealed && <span className="new-node-label">New</span>}
         </small>
         <strong>{data.label}</strong>
         <span>{data.limitation ? 'Analysis boundary · inspect details' : data.summary}</span>
@@ -59,12 +61,14 @@ export function IdentityCard({
   pinned,
   onPin,
   onDismiss,
+  onInspect,
 }: {
   value: ViewNode | ViewEdge;
   nodes: ViewNode[];
   pinned: boolean;
   onPin: () => void;
   onDismiss: () => void;
+  onInspect: () => void;
 }) {
   const node = 'name' in value ? value : undefined;
   const source = node?.source ?? (value as ViewEdge).evidence;
@@ -109,6 +113,7 @@ export function IdentityCard({
       <small>{formatSource(source)}</small>
       {!node && <p>Static source relationship. It does not establish observed execution.</p>}
       <button onClick={onPin}>{pinned ? 'Details pinned' : 'Pin details'}</button>
+      <button onClick={onInspect}>Inspect</button>
     </section>
   );
 }

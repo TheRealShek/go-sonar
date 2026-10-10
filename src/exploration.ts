@@ -1,4 +1,4 @@
-import type { GraphRequest, GraphView } from './shared/protocol';
+import type { GraphRequest, GraphView, NeighborFilter } from './shared/protocol';
 
 export const RELATIONS = [
   'calls',
@@ -12,27 +12,94 @@ export const RELATIONS = [
 
 export const VIEW_LIMIT = 80;
 
+export type ExplorationCategory = 'function' | 'field' | 'type' | 'value';
+export type ExplorationPreferences = Pick<
+  GraphRequest,
+  'kinds' | 'direction' | 'neighborLimit' | 'neighborKind'
+>;
+
+export function categoryFor(kind = 'function'): ExplorationCategory {
+  if (['function', 'method'].includes(kind)) return 'function';
+  if (kind === 'field') return 'field';
+  if (['struct', 'type', 'interface'].includes(kind)) return 'type';
+  return 'value';
+}
+
+export const QUESTIONS: Record<
+  ExplorationCategory,
+  {
+    label: string;
+    kinds: string[];
+    direction: GraphRequest['direction'];
+    neighborKind?: 'method';
+  }[]
+> = {
+  function: [
+    { label: 'Calls', kinds: ['calls'], direction: 'outgoing' },
+    { label: 'Callers', kinds: ['calls'], direction: 'incoming' },
+  ],
+  field: [
+    { label: 'Readers', kinds: ['reads'], direction: 'incoming' },
+    { label: 'Writers', kinds: ['writes'], direction: 'incoming' },
+  ],
+  type: [
+    { label: 'Construction', kinds: ['constructs'], direction: 'incoming' },
+    { label: 'Methods', kinds: ['uses_type'], direction: 'incoming', neighborKind: 'method' },
+    { label: 'Uses', kinds: ['uses_type', 'implements', 'references'], direction: 'incoming' },
+  ],
+  value: [
+    { label: 'Readers', kinds: ['reads'], direction: 'incoming' },
+    { label: 'Writers', kinds: ['writes'], direction: 'incoming' },
+    { label: 'References', kinds: ['references'], direction: 'incoming' },
+  ],
+};
+
 export function requestFor(
   focus: string,
   kind = 'function',
-  preferences?: Pick<GraphRequest, 'kinds' | 'direction' | 'neighborLimit'>,
+  preferences?: ExplorationPreferences,
 ): GraphRequest {
-  const kinds =
-    kind === 'field'
-      ? ['reads', 'writes']
-      : ['struct', 'type', 'interface'].includes(kind)
-        ? ['constructs', 'uses_type', 'implements', 'references']
-        : ['calls'];
+  const kinds = ['field', 'variable', 'constant'].includes(kind)
+    ? ['reads', 'writes']
+    : ['struct', 'type', 'interface'].includes(kind)
+      ? ['constructs', 'uses_type', 'implements', 'references']
+      : ['calls'];
   return {
     focus,
     expanded: [],
     internals: [],
     kinds,
     limit: VIEW_LIMIT,
-    direction:
-      kind === 'field' || ['struct', 'type', 'interface'].includes(kind) ? 'incoming' : 'outgoing',
+    direction: categoryFor(kind) !== 'function' ? 'incoming' : 'outgoing',
     neighborLimit: 8,
     ...preferences,
+  };
+}
+
+// A group discloses only this seed. Other seeds retain their global filters.
+export function revealGroup(
+  request: GraphRequest,
+  nodeId: string,
+  group: NeighborFilter,
+): GraphRequest {
+  return {
+    ...request,
+    expanded:
+      nodeId === request.focus || request.expanded.includes(nodeId)
+        ? request.expanded
+        : [...request.expanded.slice(-19), nodeId],
+    groups: { ...request.groups, [nodeId]: group },
+    offsets: { ...request.offsets, [nodeId]: 0 },
+  };
+}
+
+export function clearGroup(request: GraphRequest, nodeId: string): GraphRequest {
+  return {
+    ...request,
+    groups: Object.fromEntries(
+      Object.entries(request.groups ?? {}).filter(([id]) => id !== nodeId),
+    ),
+    offsets: { ...request.offsets, [nodeId]: 0 },
   };
 }
 

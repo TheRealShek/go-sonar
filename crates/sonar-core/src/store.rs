@@ -305,30 +305,46 @@ impl GraphStore {
     fn adjacent(
         &self,
         id: &str,
-        direction: Direction,
-        kinds: &[String],
+        request: &GraphRequest,
         limit: usize,
         offset: usize,
-        group: Option<&crate::NeighborFilter>,
     ) -> Result<Vec<Relation>> {
+        let empty = crate::NeighborFilter::default();
+        let group = request.groups.get(id).unwrap_or(&empty);
+        let neighbor_kind = if id == request.focus && !request.groups.contains_key(id) {
+            request.neighbor_kind.as_str()
+        } else {
+            ""
+        };
+        // An explicit group overrides direction and relationship kinds for this seed only.
+        let direction = match group.direction.as_str() {
+            "incoming" => Direction::Incoming,
+            "outgoing" => Direction::Outgoing,
+            _ => request.direction,
+        };
         let condition = match direction {
             Direction::Incoming => "r.target=?1",
             Direction::Outgoing => "r.source=?1",
             Direction::Both => "(r.source=?1 OR r.target=?1)",
+        };
+        let local_kinds = [group.kind.clone()];
+        let kinds = if group.kind.is_empty() {
+            request.kinds.as_slice()
+        } else {
+            &local_kinds
         };
         let filters = kinds
             .iter()
             .map(|k| format!("'{k}'"))
             .collect::<Vec<_>>()
             .join(",");
-        let empty = crate::NeighborFilter::default();
-        let group = group.unwrap_or(&empty);
         let sql = format!(
             "SELECT MIN(r.id), COUNT(*), SUM(CASE WHEN json_extract(r.body,'$.certainty')='possible' THEN 1 ELSE 0 END)
              FROM relations r JOIN symbols s ON s.id=CASE WHEN r.source=?1 THEN r.target ELSE r.source END
              WHERE {condition} AND r.kind IN ({filters})
              AND (?4='' OR s.package_id=?4) AND (?5='' OR r.kind=?5)
              AND (?6='' OR (?6='incoming' AND r.target=?1) OR (?6='outgoing' AND r.source=?1))
+             AND (?7='' OR s.kind=?7)
              GROUP BY r.source,r.target,r.kind
              ORDER BY MAX(s.local) DESC,
              CASE r.kind WHEN 'calls' THEN 0 WHEN 'writes' THEN 1 WHEN 'reads' THEN 2
@@ -344,7 +360,8 @@ impl GraphStore {
                     offset as i64,
                     group.package_id,
                     group.kind,
-                    group.direction
+                    group.direction,
+                    neighbor_kind
                 ],
                 |row| {
                     Ok((
@@ -386,6 +403,7 @@ impl GraphStore {
             || request.offsets.len() > 65
             || request.offsets.values().any(|offset| *offset > 1_000_000)
             || request.groups.len() > 65
+            || !["", "method"].contains(&request.neighbor_kind.as_str())
             || request.regions.len() > 64
             || request.behavior_anchors.len() > 16
             || request.outcome_offsets.len() > 16
@@ -440,14 +458,7 @@ impl GraphStore {
             }
 
             let offset = request.offsets.get(&id).copied().unwrap_or(0);
-            let adjacent = self.adjacent(
-                &id,
-                request.direction,
-                kinds,
-                page_size + 1,
-                offset,
-                request.groups.get(&id),
-            )?;
+            let adjacent = self.adjacent(&id, request, page_size + 1, offset)?;
             pages.insert(
                 id.clone(),
                 (
