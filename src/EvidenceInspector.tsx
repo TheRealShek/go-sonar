@@ -119,7 +119,7 @@ export function EvidenceInspector({
     : [];
   return (
     <>
-      <h2>Context & evidence</h2>
+      <h2>Evidence</h2>
       {selected && (
         <>
           <small>{selected.kind}</small>
@@ -128,21 +128,18 @@ export function EvidenceInspector({
             <>
               <code>{node.signature || node.details?.expression}</code>
               <p className="source-location">{node.packageId}</p>
-              {node.details ? (
-                <p>{node.details.explanation}</p>
-              ) : (
-                <p>
-                  {node.documentation
-                    ? `Documentation: ${node.documentation}`
-                    : 'No documented purpose supplied. Design intent is unknown.'}
-                </p>
+              {(node.details?.explanation || node.documentation) && (
+                <details>
+                  <summary>{node.details ? 'Operation' : 'Documentation'}</summary>
+                  <p>{node.details?.explanation ?? node.documentation}</p>
+                </details>
               )}
               {node.parentId && (
                 <p className="muted">
                   Within{' '}
                   {view?.nodes.find((parent) => parent.id === node.parentId)?.name ??
                     node.qualifiedName}
-                  . Static source structure; path feasibility is unknown.
+                  .
                 </p>
               )}
               {node.details?.limitation && <p className="notice">{node.details.limitation}</p>}
@@ -203,8 +200,8 @@ export function EvidenceInspector({
                 )}
               </div>
               {call && (
-                <section className="call-boundary" aria-label="Call boundary">
-                  <h3>Arguments and returned positions</h3>
+                <details className="call-boundary">
+                  <summary>Arguments and results</summary>
                   <small>Type-resolved callable signature</small>
                   <code>{call.signature}</code>
                   {call.receiver && (
@@ -243,11 +240,11 @@ export function EvidenceInspector({
                     These are source mappings. Passing an argument does not prove its influence on a
                     returned value. Aliasing and interprocedural value dependence are not tracked.
                   </p>
-                </section>
+                </details>
               )}
               {!!node.details?.accesses?.length && (
-                <section aria-label="Reads, writes, and definitions">
-                  <h3>Reads, writes, and definitions</h3>
+                <details>
+                  <summary>Reads and writes</summary>
                   {node.details.accesses.map((access, index) => (
                     <div className="access" key={index}>
                       <code>{access.expression}</code>
@@ -280,11 +277,11 @@ export function EvidenceInspector({
                       ))}
                     </>
                   )}
-                </section>
+                </details>
               )}
               {!node.parentId && summary && (
-                <section aria-label="Hidden relationships">
-                  <h3>Connections and omissions</h3>
+                <details>
+                  <summary>Connections · {summary.hidden} hidden</summary>
                   <p>
                     {summary.incoming} incoming source sites · {summary.outgoing} outgoing source
                     sites · {summary.distinctSymbols ?? '?'} distinct symbols.
@@ -380,7 +377,7 @@ export function EvidenceInspector({
                       </div>
                     </>
                   )}
-                </section>
+                </details>
               )}
               {!node.parentId && (
                 <details>
@@ -408,12 +405,15 @@ export function EvidenceInspector({
                   {view?.nodes.find((node) => node.id === edge.target)?.name ?? 'Target'}
                 </p>
                 <code>{view?.nodes.find((node) => node.id === edge.target)?.signature}</code>
-                <p>
+                <p
+                  className="muted"
+                  title="Source relationships do not establish observed execution."
+                >
                   {edge.certainty === 'possible'
-                    ? 'Possible source relationship. The concrete call target or runtime execution is unresolved.'
+                    ? 'Possible relationship'
                     : edge.kind === 'control'
-                      ? 'Static control structure, not observed execution.'
-                      : 'Resolved source relationship. It may execute conditionally.'}
+                      ? 'Static control'
+                      : 'Resolved source relationship'}
                 </p>
                 <code>{edge.expression}</code>
                 {edge.siteCount && edge.siteCount > 1 && (
@@ -456,10 +456,7 @@ export function EvidenceInspector({
             <button onClick={() => onSource(source)}>Open source evidence</button>
           ) : (
             <>
-              <p className="notice">
-                Declaration source is unavailable or outside this project. Inspect a local call site
-                instead.
-              </p>
+              <p className="notice">External source. Inspect a local call site.</p>
               {callers?.map((edge) => (
                 <button className="match" key={edge.id} onClick={() => onSelect(edge)}>
                   Local call from {view?.nodes.find((node) => node.id === edge.source)?.name} · line{' '}
@@ -493,15 +490,10 @@ export function EvidenceInspector({
           )}
         </>
       )}
-      {!selected && (
-        <p className="muted">
-          Hover or focus a node or edge for source identity. Click or press Enter to pin details.
-          Escape dismisses details.
-        </p>
-      )}
+      {!selected && <p className="muted">Select a node or connection.</p>}
       {!!view?.nodes.length && (
         <details className="keyboard-browser">
-          <summary>Inspect the graph with the keyboard</summary>
+          <summary>Keyboard inspection</summary>
           <label>
             Visible operation or symbol
             <select
@@ -540,12 +532,14 @@ export function EvidenceInspector({
           </label>
         </details>
       )}
-      <hr />
-      <p className="legend">
-        Arrows show relationship direction. Teal control edges show source order. Dependency
-        placement has no execution order. Dashed edges mark unresolved possibilities; loop-back
-        edges use a separate dashed route.
-      </p>
+      <details className="legend">
+        <summary>Graph legend</summary>
+        <p>
+          Arrows show relationship direction. Teal control edges show source order. Dependency
+          placement has no execution order. Dashed edges mark unresolved possibilities; loop-back
+          edges use a separate dashed route.
+        </p>
+      </details>
     </>
   );
 }
