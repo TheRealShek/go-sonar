@@ -631,6 +631,50 @@ summary:focus-visible {
 .connection-summary details {
   margin-top: 6px;
 }
+.exploration-breadcrumb {
+  padding: 6px 12px;
+  background: #fff;
+  border-bottom: 1px solid #ced7e1;
+}
+.exploration-breadcrumb ol {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.exploration-breadcrumb li + li::before {
+  content: '›';
+  padding-right: 6px;
+}
+.reset-preview p {
+  margin: 0 0 8px;
+}
+.layout-changing .react-flow__node {
+  transition:
+    transform 180ms ease,
+    width 180ms ease,
+    height 180ms ease;
+}
+.newly-revealed .symbol-card {
+  box-shadow: 0 0 0 2px #348ac6;
+}
+.symbol-card .new-node-label {
+  display: inline;
+  margin-left: 8px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: #e9f3ff;
+  color: #175b8a;
+  font-weight: 600;
+}
+@media (prefers-reduced-motion: reduce) {
+  .layout-changing .react-flow__node {
+    transition: none;
+  }
+}
 @media (max-width: 1050px) {
   .app.inspector-closed .workspace {
     grid-template-columns: 205px minmax(0, 1fr);

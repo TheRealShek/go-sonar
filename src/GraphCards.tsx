@@ -10,6 +10,7 @@ export type SymbolNode = Node<{
   role?: string;
   join?: boolean;
   limitation?: string;
+  newlyRevealed?: boolean;
 }>;
 
 export function SymbolCard({ data }: NodeProps<SymbolNode>) {
@@ -25,6 +26,7 @@ export function SymbolCard({ data }: NodeProps<SymbolNode>) {
           {data.role ?? data.kind}
           {data.grouped ? ' · static behavior' : ''}
           {data.join ? ' · join' : ''}
+          {data.newlyRevealed && <span className="new-node-label">New</span>}
         </small>
         <strong>{data.label}</strong>
         <span>{data.limitation ? 'Analysis boundary · inspect details' : data.summary}</span>

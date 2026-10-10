@@ -1,5 +1,11 @@
 import type { GraphView, ViewNode, ViewEdge, GraphRequest } from './shared/protocol';
-import { successors, MAX_FLOW_STEPS, type FlowTrail, type CallFrame } from './navigation';
+import {
+  successors,
+  explorationDestination,
+  MAX_FLOW_STEPS,
+  type FlowTrail,
+  type CallFrame,
+} from './navigation';
 
 export function FlowNavigator({
   view,
@@ -52,6 +58,10 @@ export function FlowNavigator({
   if (!behavior && !trail && !calls.length) return null;
   const current = view.nodes.find((node) => node.id === trail?.steps.at(-1)?.nodeId);
   const next = current ? successors(view, current.id) : [];
+  const previous = view.nodes.find((node) => node.id === trail?.steps.at(-2)?.nodeId);
+  const previousDestination = previous
+    ? `${previous.name} · line ${previous.source.line}`
+    : `saved operation at step ${Math.max(1, (trail?.steps.length ?? 1) - 1)}`;
   return (
     <div className="flow-navigation">
       {calls.length > 0 && (
@@ -64,7 +74,11 @@ export function FlowNavigator({
                 : ''}
             </span>
           ))}
-          <button disabled={busy} onClick={onReturn}>
+          <button
+            disabled={busy}
+            title={`Return to ${explorationDestination(calls.at(-1))} · call at line ${calls.at(-1)?.sourceLine}: ${calls.at(-1)?.expression}`}
+            onClick={onReturn}
+          >
             Return to caller
           </button>
         </div>
@@ -148,8 +162,12 @@ export function FlowNavigator({
             </ol>
           )}
           <div className="actions">
-            <button disabled={busy || trail.paused || trail.steps.length <= 1} onClick={onBack}>
-              Step backward
+            <button
+              disabled={busy || trail.paused || trail.steps.length <= 1}
+              title={`Return to ${previousDestination}`}
+              onClick={onBack}
+            >
+              Previous step
             </button>
             {current && ['region', 'boundary'].includes(current.kind) ? (
               <button disabled={busy || trail.paused} onClick={() => onReveal(current)}>
@@ -186,7 +204,7 @@ export function FlowNavigator({
           )}
           {trail.steps.length >= MAX_FLOW_STEPS && (
             <p className="notice">
-              Step limit reached. Step backward or restart. Loops stay bounded.
+              Step limit reached. Use Previous step or restart. Loops stay bounded.
             </p>
           )}
         </>

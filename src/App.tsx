@@ -29,6 +29,11 @@ import {
   focusViewport,
   operationViewport,
   MAX_CALL_DEPTH,
+  explorationDestination,
+  explorationBreadcrumbs,
+  collapseBranch,
+  resetToFocus,
+  replacedOperations,
   type NavigationFrame,
   type CallFrame,
   type FlowTrail,
@@ -148,6 +153,20 @@ export default function App() {
   const [error, setError] = useState('');
   const [impact, setImpact] = useState('');
   const [navigationNotice, setNavigationNotice] = useState('');
+  const [resetPreview, setResetPreview] = useState(false);
+  const [animateLayout, setAnimateLayout] = useState(false);
+  const layoutAnimationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const pendingLayoutAnchor = useRef<
+    | {
+        id: string;
+        position: { x: number; y: number; width: number; height: number; parentId?: string };
+      }
+    | undefined
+  >(undefined);
 
   const layout = useRef<LayoutClient | null>(null);
   const latest = useRef(new LatestRequest());
@@ -176,6 +195,7 @@ export default function App() {
     return () => {
       latest.current.invalidate();
       layout.current?.dispose();
+      if (layoutAnimationTimer.current) clearTimeout(layoutAnimationTimer.current);
       window.__SONAR_METRICS__.ready = false;
     };
   }, []);
@@ -256,6 +276,8 @@ export default function App() {
           snapshot: project.snapshot,
           request,
           selectedId: selected?.id,
+          focusLabel: view?.nodes.find((node) => node.id === request.focus)?.name,
+          focusLine: view?.nodes.find((node) => node.id === request.focus)?.source.line,
           viewport: flow.current?.getViewport(),
           trail,
           overviewFunctionId,
@@ -275,6 +297,7 @@ export default function App() {
       setFuture([]);
     }
     if (next.focus !== request?.focus) {
+      pendingLayoutAnchor.current = undefined;
       setOverviewFunctionId(undefined);
       setTrail(undefined);
       setOutcomeId(undefined);
@@ -282,6 +305,8 @@ export default function App() {
       setPinned(false);
     }
     setContinuationCallId(undefined);
+    setResetPreview(false);
+    setNavigationNotice('');
     setImpact('');
     setRequest(boundRequest(next));
   };
@@ -293,6 +318,7 @@ export default function App() {
       );
       return;
     }
+    pendingLayoutAnchor.current = undefined;
     restored.current = frame;
     for (const [id, position] of Object.entries(frame.positions ?? {}))
       positions.current.set(id, position);
@@ -333,6 +359,8 @@ export default function App() {
     setPinned(false);
     setNavigationNotice('');
     restored.current = undefined;
+    pendingLayoutAnchor.current = undefined;
+    setResetPreview(false);
     pendingFlow.current = undefined;
     pendingSelection.current = undefined;
     if (hoverTimer.current) clearTimeout(hoverTimer.current);
@@ -418,10 +446,17 @@ export default function App() {
         result.nodes.filter((node) => node.parentId).map((node) => node.parentId),
       );
 
+      const previousView = viewRef.current;
+      const anchor = pendingLayoutAnchor.current;
       const layoutStarted = performance.now();
       const geometry: LayoutResult = await layout.current!.layout({
+        anchorId:
+          anchor?.id ??
+          (result.nodes.some((node) => node.id === selectedRef.current?.id)
+            ? selectedRef.current?.id
+            : result.focus),
         nodes: result.nodes.map((node) => {
-          const old = positions.current.get(node.id);
+          const old = anchor?.id === node.id ? anchor.position : positions.current.get(node.id);
           const sameGroup = old?.parentId === node.parentId;
 
           return {
@@ -444,18 +479,26 @@ export default function App() {
       });
       const layoutMs = performance.now() - layoutStarted;
       if (!current()) return;
-      const oldFocus = positions.current.get(result.focus);
-      const focusPosition = geometry.positions[result.focus];
-      if (oldFocus && framedFocus.current === result.focus) {
-        const dx = oldFocus.x - focusPosition.x;
-        const dy = oldFocus.y - focusPosition.y;
-        for (const node of result.nodes.filter((node) => !node.parentId)) {
-          geometry.positions[node.id].x += dx;
-          geometry.positions[node.id].y += dy;
-        }
-      }
+      pendingLayoutAnchor.current = undefined;
       const selectedId = restored.current?.selectedId ?? pendingSelection.current;
       const initialNavigation = framedFocus.current !== result.focus;
+      const newlyRevealed = new Set(
+        !initialNavigation && !restored.current
+          ? result.nodes
+              .filter((node) => !previousView?.nodes.some((old) => old.id === node.id))
+              .map((node) => node.id)
+          : [],
+      );
+      const replaced = replacedOperations(previousView, result);
+      if (!restored.current && replaced.count)
+        setNavigationNotice(
+          `${replaced.count} previously visible operations in ${replaced.functions.join(', ')} were collapsed or moved outside this view to stay within the view budget. Previous exploration restores them.`,
+        );
+      if (layoutAnimationTimer.current) clearTimeout(layoutAnimationTimer.current);
+      setAnimateLayout(
+        !initialNavigation && !restored.current && mode === 'frames' && !benchmarking.current,
+      );
+      layoutAnimationTimer.current = setTimeout(() => setAnimateLayout(false), 220);
 
       let centerId: string | undefined =
         pendingSelection.current &&
@@ -482,7 +525,7 @@ export default function App() {
             return {
               id: node.id,
               type: 'symbol',
-              ariaLabel: `${node.kind}: ${node.name}`,
+              ariaLabel: `${node.kind}: ${node.name}${newlyRevealed.has(node.id) ? ' · newly revealed' : ''}`,
               parentId: node.parentId,
               extent: node.parentId ? ('parent' as const) : undefined,
               position,
@@ -491,6 +534,7 @@ export default function App() {
               style: size,
               data: {
                 label: node.name,
+                newlyRevealed: newlyRevealed.has(node.id),
                 kind: node.kind,
                 grouped: grouped.has(node.id),
                 focused: node.id === result.focus,
@@ -821,9 +865,19 @@ export default function App() {
 
   const reveal = (node: ViewNode) => {
     if (!request || busy) return;
+    const at = positions.current.get(node.id);
+    if (at && node.details?.region)
+      pendingLayoutAnchor.current = { id: node.details.region.firstNodeId, position: at };
+    const replacing = (request.regions ?? []).filter(
+      (id) => id !== node.id && id.startsWith(`${node.parentId}/behavior/`),
+    );
     pendingFlow.current = flowAfterReveal(trail, node);
     if (!pendingFlow.current) pendingSelection.current = node.details?.region?.firstNodeId;
     change(revealRegion(request, node));
+    if (replacing.length)
+      setNavigationNotice(
+        `Revealing this region collapses the previously opened region in ${view?.nodes.find((parent) => parent.id === node.parentId)?.name ?? 'this function'} to stay within the view budget. Previous exploration restores it.`,
+      );
   };
 
   const step = (edge: ViewEdge) => {
@@ -945,6 +999,27 @@ export default function App() {
   const connectionSummary = view?.summaries.find(
     (summary) => summary.nodeId === connectionNode?.id,
   );
+
+  const breadcrumbs = explorationBreadcrumbs(history, request?.focus);
+  const collapseTarget = selectedNode?.parentId ?? selectedNode?.id;
+  const collapseName =
+    view?.nodes.find((node) => node.id === collapseTarget)?.name ?? selectedNode?.name;
+  const canCollapseSelected =
+    !!request &&
+    !!collapseTarget &&
+    (request.expanded.includes(collapseTarget) ||
+      request.internals.includes(collapseTarget) ||
+      !!request.groups?.[collapseTarget] ||
+      !!request.offsets?.[collapseTarget]);
+  const restoreExploration = (index: number) => {
+    if (busy) return;
+    const destination = history[index];
+    const frame = capture();
+    if (!destination || !frame) return;
+    setHistory(history.slice(0, index));
+    setFuture([...future, frame, ...history.slice(index + 1).reverse()].slice(-20));
+    restore(destination);
+  };
 
   const statusLabel = busy
     ? 'Analyzing / laying out…'
@@ -1242,18 +1317,14 @@ export default function App() {
           <div className="graph-toolbar">
             <button
               disabled={!history.length || busy}
-              onClick={() => {
-                const previous = history.at(-1)!;
-                const frame = capture();
-                setHistory(history.slice(0, -1));
-                if (frame) setFuture([...future.slice(-19), frame]);
-                restore(previous);
-              }}
+              title={`Restore ${explorationDestination(history.at(-1))}`}
+              onClick={() => restoreExploration(history.length - 1)}
             >
-              Back
+              Previous exploration
             </button>
             <button
               disabled={!future.length || busy}
+              title={`Restore ${explorationDestination(future.at(-1))}`}
               onClick={() => {
                 const next = future.at(-1)!;
                 const frame = capture();
@@ -1262,7 +1333,7 @@ export default function App() {
                 restore(next);
               }}
             >
-              Forward
+              Next exploration
             </button>
             <button
               disabled={!view}
@@ -1291,19 +1362,29 @@ export default function App() {
               Fit graph
             </button>
             <button
-              disabled={!request || busy || !!impact}
-              onClick={() =>
-                change({
-                  expanded: [],
-                  internals: [],
-                  offsets: {},
-                  regions: [],
-                  behaviorAnchors: {},
-                  groups: {},
-                })
+              disabled={!canCollapseSelected || busy || !!impact}
+              title={
+                collapseName
+                  ? `Close ${collapseName}'s behavior and expanded neighbors only. Other branches stay open.`
+                  : 'Select an expanded declaration or its operation'
               }
+              onClick={() => {
+                if (!request || !selectedNode) return;
+                pendingSelection.current = collapseTarget;
+                if (comparedFunction === collapseTarget) setOutcomeId(undefined);
+                change(collapseBranch(request, selectedNode), trail?.functionId !== collapseTarget);
+              }}
             >
-              Collapse branches
+              Collapse selected branch
+            </button>
+            <button
+              disabled={!request || busy || !!impact}
+              aria-expanded={resetPreview}
+              aria-controls="reset-preview"
+              title="Review what will close before resetting this exploration"
+              onClick={() => setResetPreview(!resetPreview)}
+            >
+              Reset to focus
             </button>
             <button
               disabled={!selected}
@@ -1315,6 +1396,59 @@ export default function App() {
             </button>
             <span role="status">{statusLabel}</span>
           </div>
+          {resetPreview && request && (
+            <div
+              className="notice reset-preview"
+              id="reset-preview"
+              role="region"
+              aria-label="Reset exploration"
+            >
+              <p>
+                Reset to {focusNode?.name ?? 'the focused declaration'} closes{' '}
+                {request.expanded.length} expanded neighbor branches and {request.internals.length}{' '}
+                function behaviors. It clears package filters, region and page detail, and ends
+                walkthrough and call navigation. Relationship filters and saved explorations remain
+                available.
+              </p>
+              <div className="actions">
+                <button
+                  disabled={busy}
+                  onClick={() => {
+                    pendingFlow.current = undefined;
+                    pendingLayoutAnchor.current = undefined;
+                    pendingSelection.current = request.focus;
+                    setCalls([]);
+                    setTrail(undefined);
+                    setOutcomeId(undefined);
+                    setOverviewFunctionId(undefined);
+                    setContinuationCallId(undefined);
+                    change(resetToFocus(request));
+                  }}
+                >
+                  Apply reset
+                </button>
+                <button onClick={() => setResetPreview(false)}>Keep exploration</button>
+              </div>
+            </div>
+          )}
+          {view && (
+            <nav className="exploration-breadcrumb" aria-label="Exploration breadcrumb">
+              <ol>
+                {breadcrumbs.map(({ frame, index }) => (
+                  <li key={index}>
+                    <button
+                      disabled={busy}
+                      title={`Restore ${explorationDestination(frame)}`}
+                      onClick={() => restoreExploration(index)}
+                    >
+                      {frame.focusLabel ?? frame.request.focus}
+                    </button>
+                  </li>
+                ))}
+                <li aria-current="location">{focusNode?.name ?? view.focus}</li>
+              </ol>
+            </nav>
+          )}
           {view && (
             <div className="exploration-context" role="status">
               <span>Exploring {focusNode?.name ?? view.focus}</span>
@@ -1426,7 +1560,7 @@ export default function App() {
             }}
           />
           <div
-            className="canvas"
+            className={`canvas ${animateLayout ? 'layout-changing' : ''}`}
             ref={canvas}
             onFocusCapture={keyboardIdentity}
             onKeyDownCapture={(event) => {
@@ -1446,7 +1580,7 @@ export default function App() {
                 return {
                   ...node,
                   selected: selected?.id === node.id,
-                  className: `${activeOperation === node.id ? 'current-operation' : ''} ${paths && node.parentId && !paths.nodes.has(node.id) ? 'dimmed' : ''}`,
+                  className: `${node.data.newlyRevealed ? 'newly-revealed' : ''} ${activeOperation === node.id ? 'current-operation' : ''} ${paths && node.parentId && !paths.nodes.has(node.id) ? 'dimmed' : ''}`,
                 };
               })}
               edges={edges.map((edge) => {
@@ -1495,10 +1629,18 @@ export default function App() {
                 const fact = view?.nodes.find((value) => value.id === node.id);
 
                 if (fact) {
-                  if (canEnterCall(fact)) enterCall(fact);
-                  else focusSymbol(fact.parentId ?? fact.id, fact.kind);
+                  select(fact);
+                  setInspectorOpen(true);
                 }
               }}
+              onEdgeDoubleClick={(_, edge) => {
+                const fact = view?.edges.find((value) => value.id === edge.id);
+                if (fact) {
+                  select(fact);
+                  setInspectorOpen(true);
+                }
+              }}
+              zoomOnDoubleClick={false}
               nodesConnectable={false}
               edgesReconnectable={false}
               deleteKeyCode={null}

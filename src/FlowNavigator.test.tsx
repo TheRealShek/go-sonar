@@ -72,7 +72,29 @@ describe('walkthrough controls', () => {
     expect(html).toContain('Step 2 / 120');
     expect(html).toContain('Resume walkthrough');
     expect(html).not.toContain('Pause walkthrough');
-    expect(html).toContain('<button disabled="">Step backward</button>');
+    expect(html).toMatch(
+      /<button disabled="" title="Return to Input: key · line 7">Previous step<\/button>/,
+    );
     expect(html).toContain('<button disabled="">next</button>');
+  });
+
+  it('names the caller destination separately from a previous step', async () => {
+    const html = await render({
+      calls: [
+        {
+          snapshot: 'sample',
+          request: requestFor('get'),
+          focusLabel: 'Service.Get',
+          focusLine: 6,
+          callId: 'normalizing',
+          expression: 'Normalize(item)',
+          sourceLine: 16,
+          targetId: 'normalize',
+          continuationIds: [],
+        },
+      ],
+    });
+    expect(html).toContain('Return to Service.Get · line 6 · call at line 16: Normalize(item)');
+    expect(html).toContain('Return to caller');
   });
 });

@@ -11,6 +11,11 @@ import {
   followEdge,
   focusViewport,
   operationViewport,
+  collapseBranch,
+  resetToFocus,
+  explorationBreadcrumbs,
+  explorationDestination,
+  replacedOperations,
   MAX_FLOW_STEPS,
   outcomePaths,
   revealRegion,
@@ -18,14 +23,105 @@ import {
   type FlowTrail,
   type NavigationState,
   type CallFrame,
+  type NavigationFrame,
 } from './navigation';
 import type { ViewNode } from './shared/protocol';
+
+describe('exploration navigation', () => {
+  const frame = (focus: string, selectedId = focus): NavigationFrame => ({
+    snapshot: 'same',
+    request: { ...requestFor(focus), internals: [focus] },
+    selectedId,
+    focusLabel: `Service.${focus}`,
+    focusLine: 18,
+    viewport: { x: 80, y: 60, zoom: 0.5 },
+  });
+  it('restores the latest context of each ordinary focus visit', () => {
+    const first = frame('Get', 'entry');
+    const latest = {
+      ...frame('Get', 'normalize'),
+      trail: { functionId: 'Get', steps: [{ nodeId: 'entry' }, { nodeId: 'normalize' }] },
+    };
+    const history = [first, latest, frame('Normalize'), frame('Normalize', 'return')];
+    expect(explorationBreadcrumbs(history, 'Normalize')).toEqual([{ frame: latest, index: 1 }]);
+    expect(explorationDestination(latest)).toBe('Service.Get · line 18 · step 2');
+    expect(explorationBreadcrumbs(history, 'Other').at(-1)).toEqual({
+      frame: history[3],
+      index: 3,
+    });
+  });
+  it('keeps repeated visits distinct and bounds the breadcrumb width', () => {
+    const visits = [frame('Get'), frame('Normalize'), frame('Get')];
+    expect(explorationBreadcrumbs(visits, 'Other').map((item) => item.index)).toEqual([0, 1, 2]);
+    expect(
+      explorationBreadcrumbs(Array.from({ length: 20 }, (_, index) => frame(String(index)))),
+    ).toHaveLength(7);
+    expect(explorationDestination()).toBe('No saved exploration');
+    expect(
+      explorationDestination({ ...frame('Get'), focusLabel: undefined, focusLine: undefined }),
+    ).toBe('Get');
+  });
+  const request = {
+    ...requestFor('get'),
+    expanded: ['get', 'normalize'],
+    internals: ['get', 'normalize'],
+    offsets: { get: 8, normalize: 16 },
+    groups: {
+      get: { kind: 'calls', packageId: 'a', direction: 'incoming' as const },
+      normalize: { kind: 'calls', packageId: 'b', direction: 'outgoing' as const },
+    },
+    regions: ['get/behavior/a', 'normalize/behavior/b'],
+    behaviorAnchors: { get: 'a', normalize: 'b' },
+    outcomeOffsets: { get: 4, normalize: 8 },
+  };
+  it('collapses only the selected declaration even when an operation is selected', () => {
+    const next = collapseBranch(request, { id: 'a', parentId: 'get' } as ViewNode);
+    expect(next).toEqual({
+      ...request,
+      expanded: ['normalize'],
+      internals: ['normalize'],
+      offsets: { normalize: 16 },
+      groups: { normalize: request.groups.normalize },
+      regions: ['normalize/behavior/b'],
+      behaviorAnchors: { normalize: 'b' },
+      outcomeOffsets: { normalize: 8 },
+    });
+    expect(collapseBranch(request, { id: 'normalize' } as ViewNode).internals).toEqual(['get']);
+  });
+  it('resets disclosure and pages while preserving the focus and relationship choices', () => {
+    expect(resetToFocus(request)).toEqual({
+      ...request,
+      expanded: [],
+      internals: [],
+      offsets: {},
+      groups: {},
+      regions: [],
+      behaviorAnchors: {},
+      outcomeOffsets: {},
+    });
+    expect(request.internals).toEqual(['get', 'normalize']);
+  });
+});
 
 async function behavior() {
   return sampleBackend.graph({ ...requestFor('get'), internals: ['get'] });
 }
 
 describe('static path navigation', () => {
+  it('explains replaced operations for implicit behavior windows but not explicit collapse', async () => {
+    const previous = await behavior();
+    const next = { ...previous, nodes: previous.nodes.filter((node) => node.id !== 'lookup') };
+    expect(replacedOperations(previous, next)).toEqual({ count: 1, functions: ['Get'] });
+    expect(replacedOperations(previous, { ...next, behaviors: [] })).toEqual({
+      count: 0,
+      functions: [],
+    });
+    expect(replacedOperations(previous, { ...next, focus: 'normalize' })).toEqual({
+      count: 0,
+      functions: [],
+    });
+    expect(replacedOperations(undefined, next)).toEqual({ count: 0, functions: [] });
+  });
   it('keeps cache-hit and error-return routes separate from the mutation', async () => {
     const view = await behavior();
     let trail: FlowTrail = { functionId: 'get', steps: [{ nodeId: 'entry' }] };

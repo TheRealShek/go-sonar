@@ -40,7 +40,11 @@ Use package and relationship groups to narrow one symbol's neighbors. The action
 
 Expansion preserves the viewport. Following flow preserves zoom and pans only when the next operation leaves the comfortable visible area. Enable **Keep current step centered** for automatic centering at your chosen zoom. Use **Center focus** to return to the focused declaration and **Show selected node** to locate the current selection. Fit the graph explicitly when you want an overview; a large overview may shrink labels.
 
-**Back** and **Forward** restore earlier exploration context, including selection and viewport. The context line distinguishes the explored declaration, followed operation, returned call, and current inspection. **Return to current step** selects the followed operation again.
+**Previous exploration** and **Next exploration** restore saved context, including selection, disclosure, walkthrough, and viewport. Their tooltips name the destination. Exploration breadcrumbs retain ordinary focus visits as well as entered calls; choosing one restores the last saved context for that visit. The context line distinguishes the explored declaration, followed operation, returned call, and current inspection. **Return to current step** selects the followed operation again.
+
+Double-click a node or connection to open its details. Conditions, returns, and direct calls keep the current exploration open. Use **Focus symbol** or **Enter this call** for explicit navigation.
+
+**Collapse selected branch** closes the selected declaration's neighbors and behavior, preserving other branches. Selecting an operation collapses its owning function. **Reset to focus** first describes the detail it will remove. **Apply reset** closes every expanded branch and behavior, clears package filters and pages, and ends the walkthrough and call stack. Relationship choices stay selected. **Previous exploration** restores the context before either collapse or reset.
 
 Selection updates an open inspector. Use **Inspect** to open a closed inspector and **Close inspector** to reclaim its space. Selecting or stepping through nodes keeps it closed. Connection summaries, reset actions, and pagination are available above the graph without opening the inspector. Hover over a node for its identity card, or pin the details to keep them open. The card shows the signature, package, and source location when available. Type-resolved signatures can differ from the declaration's spelling.
 
@@ -48,9 +52,9 @@ Selection updates an open inspector. Use **Inspect** to open a closed inspector 
 
 Select a function or method and choose **Open behavior** to reveal internal operations inside its function group. **Start walkthrough** starts at the analyzed entry. **Pause walkthrough** keeps your progress, **Resume walkthrough** continues it, and **Restart walkthrough** explicitly returns to the entry. **Stop following** discards the path without closing the graph. Selecting Flow again preserves progress. Selecting a relationship question pauses the walkthrough; Resume reopens it at the saved operation. The current operation and available successors appear in the flow controls.
 
-At a condition, choose the labelled branch. The chosen conditions remain visible. At a supported loop, use **Follow body** or **Follow exit**. **Step backward** revisits the prior step.
+At a condition, choose the labelled branch. The chosen conditions remain visible. At a supported loop, use **Follow body** or **Follow exit**. **Previous step** revisits the prior operation; its tooltip names that destination. **Return to caller** restores the saved call frame and names the caller and originating expression in its tooltip.
 
-Long functions use collapsed regions and explicit boundaries. **Reveal region** or **Reveal next region** opens more detail. If a boundary is unsupported, inspect its limitation rather than assuming a continuation. The view has a shared node budget, so refocusing or collapsing other detail can free room.
+Long functions use collapsed regions and explicit boundaries. **Reveal region** or **Reveal next region** opens more detail. Disclosure anchors the selected operation or region and its owning function. Other nodes move around these landmarks when space is needed, with a short transition and **New** badges on revealed nodes. Reduced motion disables the transition. When the shared view budget replaces earlier detail, a notice explains the change; **Previous exploration** restores it. If a boundary is unsupported, inspect its limitation rather than assuming a continuation.
 
 Following a branch does not prove that any real input satisfies all chosen conditions. The app does not execute the function. Flow navigation stops at 120 steps to keep loops bounded.
 

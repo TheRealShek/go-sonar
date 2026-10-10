@@ -65,42 +65,62 @@ export async function calculateLayout(
   };
   walk(output.children ?? []);
 
-  // Retain known positions only if their group dimensions did not change; children use parent-relative coordinates.
-  for (const node of request.nodes) {
-    if (
-      !node.position ||
-      sizes[node.id].width !== node.width ||
-      sizes[node.id].height !== node.height
-    )
-      continue;
-
-    const candidate = node.position;
-    const size = sizes[node.id];
-    const parent = node.parentId ? sizes[node.parentId] : undefined;
-    if (
-      parent &&
-      (candidate.x < 20 ||
-        candidate.y < 60 ||
-        candidate.x + size.width > parent.width - 20 ||
-        candidate.y + size.height > parent.height - 20)
-    )
-      continue;
-
-    const overlaps = request.nodes.some((other) => {
-      if (other.id === node.id || other.parentId !== node.parentId) return false;
-
-      const at = positions[other.id];
-      const bounds = sizes[other.id];
-
-      return (
-        candidate.x < at.x + bounds.width + 12 &&
-        candidate.x + size.width + 12 > at.x &&
-        candidate.y < at.y + bounds.height + 12 &&
-        candidate.y + size.height + 12 > at.y
-      );
-    });
-    if (!overlaps) positions[node.id] = candidate;
+  // Place known landmarks first, with the selected node and its parent taking priority.
+  // New nodes move around those landmarks. Grow groups to contain retained child positions.
+  const byId = new Map(request.nodes.map((node) => [node.id, node]));
+  const anchors = new Set<string>();
+  let anchor = request.anchorId ? byId.get(request.anchorId) : undefined;
+  while (anchor && !anchors.has(anchor.id)) {
+    anchors.add(anchor.id);
+    anchor = anchor.parentId ? byId.get(anchor.parentId) : undefined;
   }
+  const siblings = new Map<string | undefined, typeof request.nodes>();
+  for (const node of request.nodes) {
+    const group = siblings.get(node.parentId) ?? [];
+    group.push(node);
+    siblings.set(node.parentId, group);
+  }
+  const place = (parentId?: string) => {
+    const group = [...(siblings.get(parentId) ?? [])];
+    for (const node of group) if (siblings.has(node.id)) place(node.id);
+    group.sort(
+      (a, b) =>
+        Number(anchors.has(b.id)) - Number(anchors.has(a.id)) ||
+        Number(!!b.position) - Number(!!a.position),
+    );
+    const placed: string[] = [];
+    for (const node of group) {
+      const candidate = { ...(node.position ?? positions[node.id]) };
+      const size = sizes[node.id];
+      if (parentId) {
+        candidate.x = Math.max(node.position ? 0 : 30, candidate.x);
+        candidate.y = Math.max(node.position ? 0 : 110, candidate.y);
+      }
+      // Every move passes a colliding sibling, so this loop is bounded by the placed nodes.
+      for (let attempt = 0; attempt < placed.length; attempt++) {
+        const collision = placed.find((id) => {
+          const at = positions[id];
+          const other = sizes[id];
+          return (
+            candidate.x < at.x + other.width + 12 &&
+            candidate.x + size.width + 12 > at.x &&
+            candidate.y < at.y + other.height + 12 &&
+            candidate.y + size.height + 12 > at.y
+          );
+        });
+        if (!collision) break;
+        if (parentId) candidate.y = positions[collision].y + sizes[collision].height + 45;
+        else candidate.x = positions[collision].x + sizes[collision].width + 80;
+      }
+      positions[node.id] = candidate;
+      placed.push(node.id);
+      if (parentId) {
+        sizes[parentId].width = Math.max(sizes[parentId].width, candidate.x + size.width + 30);
+        sizes[parentId].height = Math.max(sizes[parentId].height, candidate.y + size.height + 30);
+      }
+    }
+  };
+  place();
 
   return { positions, sizes };
 }
