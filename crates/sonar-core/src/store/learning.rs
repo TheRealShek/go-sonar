@@ -129,22 +129,32 @@ impl GraphStore {
     ) -> Result<GraphSummary> {
         let mut statement = self.connection.prepare(
             "SELECT s.package_id,r.kind,CASE WHEN r.source=?1 AND r.target=?1 AND ?2='incoming' THEN 'incoming' WHEN r.source=?1 THEN 'outgoing' ELSE 'incoming' END,
-             COUNT(*),COUNT(DISTINCT s.id),MAX(s.local)
+             COUNT(*),COUNT(DISTINCT s.id),MAX(s.local),SUM(CASE WHEN ?3='' OR s.kind=?3 THEN 1 ELSE 0 END)
              FROM relations r JOIN symbols s ON s.id=CASE WHEN r.source=?1 THEN r.target ELSE r.source END
              WHERE r.source=?1 OR r.target=?1 GROUP BY 1,2,3 ORDER BY 6 DESC,1,2,3"
         )?;
-        let direction = match request.direction {
-            Direction::Incoming => "incoming",
-            Direction::Outgoing => "outgoing",
-            Direction::Both => "both",
+        let group = request.groups.get(&node.id);
+        let direction = group
+            .map(|g| g.direction.as_str())
+            .filter(|d| !d.is_empty())
+            .unwrap_or(match request.direction {
+                Direction::Incoming => "incoming",
+                Direction::Outgoing => "outgoing",
+                Direction::Both => "both",
+            });
+        let neighbor_kind = if node.id == request.focus && group.is_none() {
+            request.neighbor_kind.as_str()
+        } else {
+            ""
         };
-        let rows = statement.query_map([node.id.as_str(), direction], |r| {
+        let rows = statement.query_map([node.id.as_str(), direction, neighbor_kind], |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, String>(1)?,
                 r.get::<_, String>(2)?,
                 read_count_at(r, 3)?,
                 read_count_at(r, 4)?,
+                read_count_at(r, 6)?,
             ))
         })?;
         let mut summary = GraphSummary {
@@ -165,11 +175,20 @@ impl GraphStore {
             more_groups: 0,
         };
         for row in rows {
-            let (package_id, kind, direction, sites, symbols) = row?;
+            let (package_id, kind, group_direction, sites, symbols, matching_sites) = row?;
+            let group_selected = group.is_none_or(|g| {
+                (g.package_id.is_empty() || g.package_id == package_id)
+                    && (g.kind.is_empty() || g.kind == kind)
+                    && (g.direction.is_empty() || g.direction == group_direction)
+            });
             let direction_allowed = matches!(request.direction, Direction::Both)
-                || (direction == "incoming" && matches!(request.direction, Direction::Incoming))
-                || (direction == "outgoing" && matches!(request.direction, Direction::Outgoing));
-            let filtered = !direction_allowed || !request.kinds.contains(&kind);
+                || (group_direction == "incoming"
+                    && matches!(request.direction, Direction::Incoming))
+                || (group_direction == "outgoing"
+                    && matches!(request.direction, Direction::Outgoing));
+            let filtered = !(group.is_some() && group_selected)
+                && (!direction_allowed || !request.kinds.contains(&kind));
+            let direction = group_direction;
             let visible = view
                 .edges
                 .iter()
@@ -204,15 +223,11 @@ impl GraphStore {
             summary.hidden += hidden;
             if filtered {
                 summary.filtered += hidden;
-            } else if page.is_none() {
-                summary.collapsed += hidden;
             } else {
-                let group_selected = request.groups.get(&node.id).is_none_or(|g| {
-                    (g.package_id.is_empty() || g.package_id == package_id)
-                        && (g.kind.is_empty() || g.kind == kind)
-                        && (g.direction.is_empty() || g.direction == direction)
-                });
-                if !group_selected {
+                let hidden_by_kind = sites.saturating_sub(matching_sites).min(hidden);
+                summary.filtered += hidden_by_kind;
+                let hidden = hidden - hidden_by_kind;
+                if page.is_none() || !group_selected {
                     summary.collapsed += hidden;
                 } else {
                     summary.paginated += hidden;
@@ -226,7 +241,7 @@ impl GraphStore {
                     sites,
                     symbols,
                     visible,
-                    filtered,
+                    filtered: filtered || matching_sites == 0,
                 });
             } else {
                 summary.more_groups += 1;
