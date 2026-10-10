@@ -1,5 +1,5 @@
 import type { ELK, ElkNode } from 'elkjs/lib/elk-api.js';
-import type { LayoutRequest, LayoutResult } from './contract';
+import type { LayoutRequest, LayoutResult, Point } from './contract';
 
 export async function calculateLayout(
   request: LayoutRequest,
@@ -36,8 +36,15 @@ export async function calculateLayout(
     layoutOptions: {
       'elk.algorithm': 'layered',
       'elk.direction': 'RIGHT',
+      'elk.edgeRouting': 'ORTHOGONAL',
+      'elk.spacing.edgeEdge': '16',
+      'elk.spacing.edgeNode': '20',
+      'elk.layered.spacing.edgeEdgeBetweenLayers': '16',
+      // Limit sibling rows so fan-out uses horizontal space instead of a tall column.
+      'elk.layered.layering.strategy': 'COFFMAN_GRAHAM',
+      'elk.layered.layering.coffmanGraham.layerBound': '3',
       'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
-      'elk.spacing.nodeNode': '45',
+      'elk.spacing.nodeNode': '28',
       'elk.layered.spacing.nodeNodeBetweenLayers': '80',
     },
     children,
@@ -45,6 +52,17 @@ export async function calculateLayout(
       id: edge.id,
       sources: [edge.source],
       targets: [edge.target],
+      labels:
+        edge.kind === 'control' && edge.label
+          ? [
+              {
+                id: `${edge.id}-label`,
+                text: edge.label,
+                width: edge.label.length * 7 + 12,
+                height: 20,
+              },
+            ]
+          : [],
       layoutOptions: {
         'elk.layered.priority.direction': edge.loopBack
           ? '0'
@@ -65,42 +83,38 @@ export async function calculateLayout(
   };
   walk(output.children ?? []);
 
-  // Retain known positions only if their group dimensions did not change; children use parent-relative coordinates.
-  for (const node of request.nodes) {
-    if (
-      !node.position ||
-      sizes[node.id].width !== node.width ||
-      sizes[node.id].height !== node.height
-    )
-      continue;
-
-    const candidate = node.position;
-    const size = sizes[node.id];
-    const parent = node.parentId ? sizes[node.parentId] : undefined;
-    if (
-      parent &&
-      (candidate.x < 20 ||
-        candidate.y < 60 ||
-        candidate.x + size.width > parent.width - 20 ||
-        candidate.y + size.height > parent.height - 20)
-    )
-      continue;
-
-    const overlaps = request.nodes.some((other) => {
-      if (other.id === node.id || other.parentId !== node.parentId) return false;
-
-      const at = positions[other.id];
-      const bounds = sizes[other.id];
-
-      return (
-        candidate.x < at.x + bounds.width + 12 &&
-        candidate.x + size.width + 12 > at.x &&
-        candidate.y < at.y + bounds.height + 12 &&
-        candidate.y + size.height + 12 > at.y
+  // ELK routes and nodes must use the same coordinates. Reusing individual old
+  // positions would make paths cross nodes that moved after routing.
+  const routes: LayoutResult['routes'] = {};
+  const offsets = new Map<string, Point>([['root', { x: 0, y: 0 }]]);
+  const locate = (node: ElkNode, parent: Point) => {
+    const offset = { x: parent.x + (node.x ?? 0), y: parent.y + (node.y ?? 0) };
+    offsets.set(node.id, offset);
+    for (const child of node.children ?? []) locate(child, offset);
+  };
+  locate(output, { x: 0, y: 0 });
+  const collect = (node: ElkNode) => {
+    for (const edge of node.edges ?? []) {
+      const offset = offsets.get(edge.container ?? node.id)!;
+      const absolute = (point: Point): Point => ({ x: point.x + offset.x, y: point.y + offset.y });
+      const sections = (edge.sections ?? []).map((section) =>
+        [section.startPoint, ...(section.bendPoints ?? []), section.endPoint].map(absolute),
       );
-    });
-    if (!overlaps) positions[node.id] = candidate;
-  }
+      const label = edge.labels?.[0];
+      if (sections.length)
+        routes[edge.id] = {
+          sections,
+          label: label
+            ? absolute({
+                x: (label.x ?? 0) + (label.width ?? 0) / 2,
+                y: (label.y ?? 0) + (label.height ?? 0) / 2,
+              })
+            : undefined,
+        };
+    }
+    for (const child of node.children ?? []) collect(child);
+  };
+  collect(output);
 
-  return { positions, sizes };
+  return { positions, sizes, routes };
 }

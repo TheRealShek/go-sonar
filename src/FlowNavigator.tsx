@@ -57,48 +57,42 @@ export function FlowNavigator({
         </div>
       )}
       {(trail || outcomeId) && (
-        <p className="static-path">
-          Static source path. Choices do not prove feasible inputs, concrete values, or observed
-          execution.
-        </p>
+        <span
+          className="static-path"
+          title="Source paths do not prove feasible inputs, concrete values, or observed execution."
+        >
+          Static path
+        </span>
       )}
-      {continuationCallId && (
-        <p className="notice">
-          Returned to the original call occurrence. Highlighted control edges show its immediate
-          continuation.{' '}
-          {trail &&
-            trail.steps.at(-1)?.nodeId !== continuationCallId &&
-            'The followed path remains at its previous operation.'}
-        </p>
-      )}
+      {continuationCallId && <p className="notice">Caller restored · continuation highlighted.</p>}
       {outcomeId && outcomePartial && (
-        <p className="notice">
-          Only part of the control route is visible. Hidden regions prevent a complete
-          entry-to-return comparison.
-        </p>
+        <p className="notice">Partial route · reveal hidden regions to compare.</p>
       )}
       {trail && (
         <>
           <div className="flow-current" role="status">
-            <strong>Current: {current?.name ?? 'Hidden operation'}</strong>
+            <strong>{current?.name ?? 'Hidden operation'}</strong>
             <span>
               Step {trail.steps.length} / {MAX_FLOW_STEPS}
             </span>
           </div>
           {trail.steps.some((step) => step.condition) && (
-            <ol className="conditions" aria-label="Chosen conditions">
-              {trail.steps
-                .filter((step) => step.condition)
-                .map((step, index) => (
-                  <li key={index}>
-                    <code>{step.condition}</code> → {step.branch}
-                  </li>
-                ))}
-            </ol>
+            <details>
+              <summary>Chosen branches</summary>
+              <ol className="conditions" aria-label="Chosen conditions">
+                {trail.steps
+                  .filter((step) => step.condition)
+                  .map((step, index) => (
+                    <li key={index}>
+                      <code>{step.condition}</code> → {step.branch}
+                    </li>
+                  ))}
+              </ol>
+            </details>
           )}
           <div className="actions">
             <button disabled={trail.steps.length <= 1} onClick={onBack}>
-              Step backward
+              Back
             </button>
             {current && ['region', 'boundary'].includes(current.kind) ? (
               <button onClick={() => onReveal(current)}>Reveal next region</button>
@@ -120,30 +114,26 @@ export function FlowNavigator({
                 </button>
               ))
             )}
-            <button onClick={onStop}>Stop following</button>
+            <button onClick={onStop}>Stop</button>
           </div>
           {current?.details?.limitation && <p className="notice">{current.details.limitation}</p>}
           {!next.length && current && !['region', 'boundary'].includes(current.kind) && (
             <p>
               {current.kind === 'exit'
-                ? 'This source path reaches the function exit.'
+                ? 'Function exit.'
                 : current.kind === 'return'
-                  ? 'This return has no visible continuation.'
-                  : 'No analyzed continuation is available. This path is incomplete.'}
+                  ? 'Return reached.'
+                  : 'No analyzed continuation · incomplete path.'}
             </p>
           )}
           {trail.steps.length >= MAX_FLOW_STEPS && (
-            <p className="notice">
-              Step limit reached. Step backward or restart. Loops stay bounded.
-            </p>
+            <p className="notice">Step limit reached. Go back or restart.</p>
           )}
         </>
       )}
       {behavior && (
         <details className="outcomes" open={!!outcomeId}>
-          <summary>
-            What can this return? · {behavior.returnCount} analyzed return statements
-          </summary>
+          <summary>Returns · {behavior.returnCount}</summary>
           {behavior.returns.map((node) => (
             <button
               key={node.id}
@@ -171,26 +161,14 @@ export function FlowNavigator({
           </div>
           {behavior.incomplete && (
             <p className="notice">
-              Unsupported control regions may contain other returns. This inventory is incomplete.
+              Incomplete inventory · unsupported regions may contain returns.
             </p>
           )}
-          <p>
-            Highlighted control connections may reach this return. Loops are visited once; route
-            feasibility is unknown.
-          </p>
+          <p className="muted">Possible routes only. Loops visited once.</p>
         </details>
       )}
-      {behavior && (
-        <p className="muted">
-          {behavior.totalNodes} source operations · {behavior.hiddenNodes} collapsed or outside this
-          view{behavior.incomplete ? ' · unsupported control regions' : ''}.
-        </p>
-      )}
       {behavior?.incomplete && !behavior.entryId && (
-        <p className="notice">
-          No local behavior is available for this declaration. Inspect a local call site or the
-          declared contract.
-        </p>
+        <p className="notice">No local behavior. Inspect the call site.</p>
       )}
       {!trail && behavior?.entryId && (
         <button onClick={() => onStart(functionId)}>Follow flow</button>

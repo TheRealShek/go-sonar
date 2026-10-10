@@ -27,7 +27,7 @@ export function SymbolCard({ data }: NodeProps<SymbolNode>) {
           {data.join ? ' · join' : ''}
         </small>
         <strong>{data.label}</strong>
-        <span>{data.limitation ? 'Analysis boundary · inspect details' : data.summary}</span>
+        <span>{data.limitation ? 'Analysis boundary' : data.summary}</span>
       </div>
       <Handle type="source" position={behavior ? Position.Bottom : Position.Right} />
       {decision && (
@@ -56,13 +56,11 @@ export const formatSource = (span: { file: string; line: number; column: number 
 export function IdentityCard({
   value,
   nodes,
-  pinned,
   onPin,
   onDismiss,
 }: {
   value: ViewNode | ViewEdge;
   nodes: ViewNode[];
-  pinned: boolean;
   onPin: () => void;
   onDismiss: () => void;
 }) {
@@ -107,8 +105,8 @@ export function IdentityCard({
         </>
       )}
       <small>{formatSource(source)}</small>
-      {!node && <p>Static source relationship. It does not establish observed execution.</p>}
-      <button onClick={onPin}>{pinned ? 'Details pinned' : 'Pin details'}</button>
+
+      <button onClick={onPin}>Inspect</button>
     </section>
   );
 }

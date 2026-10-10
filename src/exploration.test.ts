@@ -91,15 +91,6 @@ describe('replaceable layout contract', () => {
     expect(result.sizes.function.width).toBeGreaterThan(result.sizes.operation.width);
     expect(Number.isFinite(result.positions.callee.x)).toBe(true);
   });
-
-  it('retains existing positions for stable leaf dimensions', async () => {
-    const result = await calculateLayout(
-      { nodes: [{ id: 'a', width: 220, height: 88, position: { x: 30, y: 80 } }], edges: [] },
-      testElk,
-    );
-
-    expect(result.positions.a).toEqual({ x: 30, y: 80 });
-  });
 });
 
 describe('neighbor relation-site pagination', () => {

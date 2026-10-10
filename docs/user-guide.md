@@ -6,15 +6,15 @@ For installation and startup, see [Run locally](../README.md#run-locally).
 
 ## Open a project
 
-Enter the absolute path to a directory containing `go.mod` and open it. **Choose folder** fills the path; you still need to open the selected directory. **Recent projects** lets you reuse a previously opened path.
+Open the project menu in the top bar, enter the absolute path to a directory containing `go.mod`, and open it. **Choose folder** fills the path; you still need to open the selected directory. **Recent projects** lets you reuse a previously opened path.
 
 Select an individual module, rather than a workspace root containing only `go.work`. Dependencies and the required Go toolchain must already be available locally. Analysis will report missing dependencies instead of downloading them.
 
-After loading, review the coverage summary and diagnostics. A graph with results can still have incomplete coverage.
+After loading, open **Coverage** in the top bar to review analysis scope and diagnostics. A graph with results can still have incomplete coverage.
 
 ## Choose a starting point
 
-Search by a declaration name, such as `Get`, or use **Browse packages and declarations** to narrow results by package and kind. Executable modules can offer discovered `main` functions as starting points. Libraries can start at a type, method, field, or any other indexed declaration.
+Search by a declaration name, such as `Get`, or use **Browse declarations** to narrow results by package and kind. Executable modules can offer discovered `main` functions as starting points. Libraries can start at a type, method, field, or any other indexed declaration.
 
 The initial relationship choices depend on the symbol. Functions start with outgoing calls, fields with incoming reads and writes, and types with incoming construction and type-related uses. The initial neighbor budget is eight connections. Existing exploration preferences can carry over when you refocus.
 
@@ -22,11 +22,11 @@ The initial relationship choices depend on the symbol. Functions start with outg
 
 Choose a question to set the view:
 
-- **What does this call?** shows outgoing call relationships.
-- **Who calls this?** shows incoming call relationships.
-- **How does this work?** starts following the function's internal flow.
+- **Calls** shows outgoing call relationships.
+- **Callers** shows incoming call relationships.
+- **Flow** starts following the function's internal flow.
 
-You can also set incoming, outgoing, or both directions and toggle relationship categories. A filter changes the view, not the source or index. Clearing all categories hides external relationships.
+Open **Filters** to set incoming, outgoing, or both directions and toggle relationship categories. A filter changes the view, not the source or index. Clearing all categories hides external relationships.
 
 Select a symbol and use **Expand neighbors** to reveal another level. **Collapse neighbors** reduces detail. **Focus symbol** makes it the starting point for a new exploration. Shared symbols and cycles reuse the same identity rather than expanding forever.
 
@@ -36,15 +36,23 @@ Use package and relationship groups to narrow a crowded view, then **Show all pa
 
 ## Keep your place
 
-Expansion preserves the viewport. Use **Center focus** to return to the focused declaration and **Show selected node** to locate the current selection. Fit the graph explicitly when you want an overview; a large overview may shrink labels.
+The graph is the main workspace. Toggle **Symbols** to hide or reveal the search panel. Selecting a node or connection opens the evidence inspector; its close button or Escape dismisses it. Use **Inspect** to reopen it, including for keyboard selection. Project information, coverage, and filters stay collapsed until requested.
 
-**Back** and **Forward** restore earlier exploration context, including selection and viewport. Hover over a node for its identity card, or pin the details to keep them open. The card shows the signature, package, and source location when available. Type-resolved signatures can differ from the declaration's spelling.
+Call neighborhoods spread across horizontal layers with at most three sibling nodes per layer. Column position does not imply call order. The initial neighborhood fits the canvas when labels can remain at least 80% of their normal size; larger views keep the focus at normal size. The minimap appears for views with more than 12 nodes.
+
+The application always uses a dark Nord palette. Calls and Callers use smooth curves between node handles. These curves can pass behind intermediate nodes. Flow uses right-angle paths around nodes to keep branches and loops distinct. Call and dependency labels appear on hover, keyboard focus, or selection. Branch labels remain visible; dashed lines still mark possible relations and loop backs. Colors help trace connections and do not imply execution order.
+
+Dragging a node keeps call curves attached to its handles. In Flow, dragging switches to simpler lines until the next graph query restores automatic placement and routed lines. Pan or zoom to explore without changing the layout.
+
+Expansion preserves the viewport. Use **Center** to return to the focused declaration and **Show selected node** to locate the current selection. Fit the graph explicitly when you want an overview; a large overview may shrink labels.
+
+**Back** and **Forward** restore earlier exploration context, including selection and viewport. Hover over a node for its identity card, then choose **Inspect** to open its evidence panel. The card shows the signature, package, and source location when available. Type-resolved signatures can differ from the declaration's spelling.
 
 ## Follow a function
 
 Select a function or method and choose **Open behavior** to reveal internal operations inside its function group. **Follow flow** starts at the analyzed entry. The current operation and available successors appear in the flow controls.
 
-At a condition, choose the labelled branch. The chosen conditions remain visible. At a supported loop, use **Follow body** or **Follow exit**. **Step backward** revisits the prior step; **Stop following** ends the path selection.
+At a condition, choose the labelled branch. The chosen conditions remain visible. At a supported loop, use **Follow body** or **Follow exit**. **Back** revisits the prior step; **Stop** ends the path selection.
 
 Long functions use collapsed regions and explicit boundaries. **Reveal region** or **Reveal next region** opens more detail. If a boundary is unsupported, inspect its limitation rather than assuming a continuation. The view has a shared node budget, so refocusing or collapsing other detail can free room.
 
@@ -52,7 +60,7 @@ Following a branch does not prove that any real input satisfies all chosen condi
 
 ### Inspect returns
 
-Open behavior, then use **What can this return?** to select a return statement. The graph highlights control connections that may reach it. **Previous returns** and **More returns** page through long lists; **Show alternatives** clears the selected outcome.
+Open behavior, then use **Returns** to select a return statement. The graph highlights control connections that may reach it. **Previous returns** and **More returns** page through long lists; **Show alternatives** clears the selected outcome.
 
 Outcome highlighting visits loops once. It does not enumerate every path or prove route feasibility. Read the return expression and any unsupported boundaries before drawing a conclusion.
 
@@ -90,7 +98,7 @@ Syntax and type errors can make the snapshot incomplete and remove affected stal
 
 ## Keyboard inspection
 
-Use Tab to reach the controls and **Inspect the graph with the keyboard** to select a visible operation, symbol, or connection. The inspector exposes the corresponding actions and evidence. Escape dismisses identity details and the current inspection selection.
+Use Tab to reach the controls and **Keyboard inspection** to select a visible operation, symbol, or connection. The inspector exposes the corresponding actions and evidence. Escape dismisses identity details and the current inspection selection.
 
 Keyboard controls exist in the current source. Full keyboard usability remains a proposed acceptance check, not a completed accessibility audit.
 

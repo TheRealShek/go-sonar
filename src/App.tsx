@@ -12,6 +12,7 @@ import {
 } from '@xyflow/react';
 import { backend, isDesktop, chooseProjectFolder } from './backend';
 import { nodeTypes, IdentityCard, type SymbolNode } from './GraphCards';
+import { edgeTypes, connectionColor } from './GraphEdges';
 import { FlowNavigator } from './FlowNavigator';
 import { EvidenceInspector } from './EvidenceInspector';
 import {
@@ -113,7 +114,6 @@ export default function App() {
   const [outcomeId, setOutcomeId] = useState<string>();
   const [continuationCallId, setContinuationCallId] = useState<string>();
   const [hovered, setHovered] = useState<ViewNode | ViewEdge>();
-  const [pinned, setPinned] = useState(false);
   const [evidence, setEvidence] = useState<SourceSpan>();
   const [discovery, setDiscovery] = useState<Discovery>();
   const [browserKind, setBrowserKind] = useState('');
@@ -123,6 +123,8 @@ export default function App() {
   const [searching, setSearching] = useState(false);
   const [recents, setRecents] = useState(recentPaths);
   const [wideSource, setWideSource] = useState(false);
+  const [explorerOpen, setExplorerOpen] = useState(true);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
 
   const [view, setView] = useState<GraphView>();
   const [nodes, setNodes] = useState<SymbolNode[]>([]);
@@ -265,7 +267,6 @@ export default function App() {
       setTrail(undefined);
       setOutcomeId(undefined);
       pendingSelection.current = next.focus;
-      setPinned(false);
     }
     setContinuationCallId(undefined);
     setImpact('');
@@ -311,7 +312,6 @@ export default function App() {
     setExcerpt(undefined);
     setSelected(undefined);
     setHovered(undefined);
-    setPinned(false);
     setNavigationNotice('');
     restored.current = undefined;
     pendingFlow.current = undefined;
@@ -328,6 +328,7 @@ export default function App() {
       if (!current()) return;
 
       setProject(summary);
+      setInspectorOpen(false);
       if (isDesktop) {
         const next = [summary.root, ...recents.filter((path) => path !== summary.root)].slice(0, 8);
         setRecents(next);
@@ -432,6 +433,17 @@ export default function App() {
           geometry.positions[node.id].x += dx;
           geometry.positions[node.id].y += dy;
         }
+        for (const route of Object.values(geometry.routes)) {
+          for (const section of route.sections)
+            for (const point of section) {
+              point.x += dx;
+              point.y += dy;
+            }
+          if (route.label) {
+            route.label.x += dx;
+            route.label.y += dy;
+          }
+        }
       }
       const selectedId = restored.current?.selectedId ?? pendingSelection.current;
       const initialNavigation = framedFocus.current !== result.focus;
@@ -454,9 +466,11 @@ export default function App() {
             const position = geometry.positions[node.id];
             positions.current.set(node.id, { ...position, ...size, parentId: node.parentId });
             const summary = result.summaries.find((item) => item.nodeId === node.id);
-            const summaryText = summary
-              ? `${summary.distinctSymbols ?? 0} symbols · ${summary.sourceSites ?? summary.incoming + summary.outgoing} source sites${summary.hidden ? ` · ${summary.hidden} hidden` : ''}`
-              : '';
+            const summaryText = summary?.hidden
+              ? `${summary.hidden} hidden`
+              : node.parentId
+                ? ''
+                : node.packageId;
 
             return {
               id: node.id,
@@ -491,7 +505,9 @@ export default function App() {
               ? `${edge.label || 'continue'} · loop back`
               : edge.label || edge.kind,
             ariaLabel: `${result.nodes.find((node) => node.id === edge.source)?.name} to ${result.nodes.find((node) => node.id === edge.target)?.name}: ${edge.label || edge.kind}`,
-            type: edge.loopBack ? 'smoothstep' : 'default',
+            type: 'routed',
+            data: { route: geometry.routes[edge.id], curved: grouped.size === 0 },
+            className: edge.kind === 'control' ? 'control-edge' : 'dependency-edge',
             sourceHandle:
               edge.kind !== 'control' &&
               result.nodes.find((node) => node.id === edge.source)?.parentId
@@ -501,13 +517,17 @@ export default function App() {
                   : ['false', 'done'].includes(edge.label)
                     ? 'branch-false'
                     : undefined,
-            markerEnd: { type: MarkerType.ArrowClosed },
+            markerEnd: {
+              type: MarkerType.ArrowClosed,
+              color: connectionColor(edge.id, edge.kind, edge.label),
+            },
             style: {
-              stroke:
-                edge.kind === 'data' ? '#9e61cf' : edge.kind === 'control' ? '#277e88' : '#52647d',
+              stroke: connectionColor(edge.id, edge.kind, edge.label),
+              strokeWidth: 2,
               strokeDasharray: edge.certainty === 'possible' || edge.loopBack ? '6 4' : undefined,
             },
-            labelStyle: { fontSize: 11 },
+            labelStyle: { fontSize: 11, fill: 'var(--foreground)' },
+            labelBgStyle: { fill: 'var(--panel)' },
             reconnectable: false,
           })),
         );
@@ -584,7 +604,18 @@ export default function App() {
             const bounds = canvas.current?.getBoundingClientRect();
             if (bounds)
               await flow.current.setViewport(
-                focusViewport(geometry.positions[result.focus], size.width, bounds),
+                focusViewport(
+                  geometry.positions[result.focus],
+                  size.width,
+                  bounds,
+                  displayBounds(
+                    result.nodes.map((node) => ({
+                      parentId: node.parentId,
+                      position: geometry.positions[node.id],
+                      ...geometry.sizes[node.id],
+                    })),
+                  ),
+                ),
                 { duration: 0 },
               );
           }
@@ -670,6 +701,10 @@ export default function App() {
     ? view?.summaries.find((summary) => summary.nodeId === selectedNode.id)
     : undefined;
 
+  const comparedFunction =
+    view?.behaviors?.find((behavior) => behavior.returns.some((node) => node.id === outcomeId))
+      ?.symbolId ?? view?.nodes.find((node) => node.id === outcomeId)?.parentId;
+
   const inspect = async (span: SourceSpan) => {
     const current = sourceLatest.current.next();
     setExcerpt(undefined);
@@ -683,9 +718,9 @@ export default function App() {
   };
 
   const select = (value: ViewNode | ViewEdge) => {
+    setInspectorOpen(true);
     sourceLatest.current.invalidate();
     setSelected(value);
-    setPinned(true);
     setHovered(undefined);
     setExcerpt(undefined);
   };
@@ -703,9 +738,12 @@ export default function App() {
         direction: next.direction,
         neighborLimit: next.neighborLimit,
       };
-    if (updates.internals && trail && !updates.internals.includes(trail.functionId)) {
-      setTrail(undefined);
-      setOutcomeId(undefined);
+    if (updates.internals) {
+      if (request.internals.includes(request.focus) && !updates.internals.includes(request.focus))
+        framedFocus.current = undefined;
+      if (trail && !updates.internals.includes(trail.functionId)) setTrail(undefined);
+      if (outcomeId && !updates.internals.includes(comparedFunction ?? request.focus))
+        setOutcomeId(undefined);
     }
     navigate(next);
   };
@@ -823,8 +861,8 @@ export default function App() {
   useEffect(() => {
     const dismiss = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        setInspectorOpen(false);
         setHovered(undefined);
-        setPinned(false);
         setSelected(undefined);
         setExcerpt(undefined);
         sourceLatest.current.invalidate();
@@ -839,6 +877,10 @@ export default function App() {
 
   const onNodesChange = (changes: NodeChange<SymbolNode>[]) => {
     setNodes((current) => applyNodeChanges(changes, current));
+    if (changes.some((change) => change.type === 'position'))
+      setEdges((current) =>
+        current.map((edge) => ({ ...edge, data: { ...edge.data, route: undefined } })),
+      );
 
     for (const change of changes)
       if (change.type === 'position' && change.position) {
@@ -847,99 +889,123 @@ export default function App() {
       }
   };
 
-  const comparedFunction =
-    view?.behaviors?.find((behavior) => behavior.returns.some((node) => node.id === outcomeId))
-      ?.symbolId ?? view?.nodes.find((node) => node.id === outcomeId)?.parentId;
   const comparedPaths =
     outcomeId && view ? outcomePaths(view, comparedFunction ?? view.focus, outcomeId) : undefined;
   const activeOperation = currentOperation(trail, continuationCallId);
 
+  const focusNode = view?.nodes.find((node) => node.id === request?.focus);
+  const graphMode = request?.internals.includes(request.focus)
+    ? 'flow'
+    : request?.kinds.length === 1 && request.kinds[0] === 'calls'
+      ? request.direction
+      : undefined;
+
   const statusLabel = busy
-    ? 'Analyzing / laying out…'
+    ? 'Updating…'
     : view
       ? `${view.nodes.length} nodes · ${view.edges.length} edges${view.truncated ? ' · view limit reached' : ''}`
-      : 'Choose a project, then a symbol';
+      : 'Ready';
 
   return (
     <div className={`app ${wideSource ? 'wide-source' : ''}`}>
       <header>
         <div>
           <strong>Go Sonar</strong>
-          <span>Local Go code explorer</span>
         </div>
-        {!isDesktop && <b className="sample-banner">SAMPLE PREVIEW · no local analysis</b>}
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            void loadProject();
-          }}
-        >
-          <input
-            aria-label="Project path"
-            placeholder="Absolute Go module path"
-            value={root}
-            onChange={(event) => setRoot(event.target.value)}
-            disabled={!isDesktop}
-          />
-          <button disabled={busy || (isDesktop && !root.trim())}>
-            {isDesktop ? 'Open project' : 'Open sample'}
-          </button>
-        </form>
-        {isDesktop && (
-          <button
-            disabled={busy}
-            onClick={() => {
-              void chooseProjectFolder()
-                .then((path) => {
-                  if (path) setRoot(path);
-                })
-                .catch((error) => setError(String(error)));
-            }}
-          >
-            Choose folder
-          </button>
+        {!isDesktop && (
+          <b className="sample-banner" title="Illustrative data, not local analysis">
+            Sample preview
+          </b>
         )}
-        {isDesktop && !!recents.length && (
-          <select
-            aria-label="Recent projects"
-            value=""
-            onChange={(event) => setRoot(event.target.value)}
-          >
-            <option value="">Recent projects</option>
-            {recents.map((path) => (
-              <option key={path} value={path}>
-                {path}
-              </option>
-            ))}
-          </select>
-        )}
+        <details className="project-menu" open={!project}>
+          <summary>{project?.name ?? 'Open project'}</summary>
+          <div className="project-popover">
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void loadProject();
+              }}
+            >
+              <input
+                aria-label="Project path"
+                placeholder="Absolute Go module path"
+                value={root}
+                onChange={(event) => setRoot(event.target.value)}
+                disabled={!isDesktop}
+              />
+              <button disabled={busy || (isDesktop && !root.trim())}>
+                {isDesktop ? 'Open project' : 'Open sample'}
+              </button>
+            </form>
+            {isDesktop && (
+              <button
+                disabled={busy}
+                onClick={() => {
+                  void chooseProjectFolder()
+                    .then((path) => {
+                      if (path) setRoot(path);
+                    })
+                    .catch((error) => setError(String(error)));
+                }}
+              >
+                Choose folder
+              </button>
+            )}
+            {isDesktop && !!recents.length && (
+              <select
+                aria-label="Recent projects"
+                value=""
+                onChange={(event) => setRoot(event.target.value)}
+              >
+                <option value="">Recent projects</option>
+                {recents.map((path) => (
+                  <option key={path} value={path}>
+                    {path}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        </details>
         <button disabled={!project || busy} onClick={() => void loadProject(true)}>
           Refresh
         </button>
-      </header>
-      <div className="workspace">
-        <aside className="explorer">
-          <h2>{project?.name ?? 'Start an exploration'}</h2>
-          {project && (
-            <>
-              <p className="muted">
+        <details className="project-info">
+          <summary>
+            Coverage{project?.diagnostics.length ? ` · ${project.diagnostics.length}` : ''}
+          </summary>
+          <div className="project-popover">
+            <p>Static source analysis. Runtime execution and dynamic targets are not proven.</p>
+            {project && (
+              <p>
                 {project.symbolCount} symbols · {project.relationCount} relations
-              </p>
-              <p className="muted">
-                Snapshot {project.snapshot.slice(0, 12)}
                 <br />
                 {project.stats.analyzedPackages} packages analyzed · {project.stats.reusedPackages}{' '}
-                reused · {project.stats.changedFiles} files changed ·{' '}
-                {Math.round(project.stats.durationMs)} ms
+                reused · {Math.round(project.stats.durationMs)} ms
               </p>
-            </>
-          )}
+            )}
+            {project?.diagnostics.map((diagnostic, index) => (
+              <p key={index}>
+                {diagnostic.severity}: {diagnostic.message}
+              </p>
+            ))}
+          </div>
+        </details>
+      </header>
+      <div className="workspace">
+        <aside className="explorer" hidden={!explorerOpen}>
+          <div className="panel-heading">
+            <h2>Symbols</h2>
+            <button aria-label="Close symbols" onClick={() => setExplorerOpen(false)}>
+              ×
+            </button>
+          </div>
           <label>
-            Find any symbol
+            Search
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Name, struct, field, method…"
+              placeholder="Search symbols…"
               disabled={!project}
             />
           </label>
@@ -959,31 +1025,26 @@ export default function App() {
           </div>
           {searching && <p role="status">Searching symbols…</p>}
           {project && !searching && !matches.length && (
-            <p className="muted">No matching symbols in the covered analysis.</p>
+            <p className="muted">No matching symbols.</p>
           )}
           {project && !request && (
             <section className="first-exploration">
-              <h3>Choose a starting point</h3>
+              <h3>Entry points</h3>
               {discovery?.entrypoints.map((symbol) => (
                 <button
                   className="match"
                   key={symbol.id}
                   onClick={() => focusSymbol(symbol.id, symbol.kind)}
                 >
-                  <strong>Executable entry: {symbol.name}</strong>
+                  <strong>{symbol.name}</strong>
                   <small>{symbol.packageId}</small>
                 </button>
               ))}
-              <p className="muted">
-                {discovery?.entrypoints.length
-                  ? 'Start at an entry or browse any declaration below.'
-                  : 'Library module. Browse packages, types, or functions below.'}
-              </p>
             </section>
           )}
           {project && (
             <details>
-              <summary>Browse packages and declarations</summary>
+              <summary>Browse declarations</summary>
               <label>
                 Package
                 <input
@@ -1064,57 +1125,78 @@ export default function App() {
               </div>
             </details>
           )}
-          <h3>Explore a question</h3>
-          <div className="questions">
-            <button
-              disabled={!request || busy}
-              onClick={() => change({ kinds: ['calls'], direction: 'outgoing', groups: {} })}
-            >
-              What does this call?
-            </button>
-            <button
-              disabled={!request || busy}
-              onClick={() => change({ kinds: ['calls'], direction: 'incoming', groups: {} })}
-            >
-              Who calls this?
-            </button>
-            <button disabled={!request || busy} onClick={() => startFlow(request!.focus)}>
-              How does this work?
-            </button>
-          </div>
-          <h3>Relationships</h3>
-          {RELATIONS.map((kind) => (
-            <label className="checkbox" key={kind}>
-              <input
-                type="checkbox"
-                checked={request?.kinds.includes(kind) ?? kind === 'calls'}
-                disabled={!request}
-                onChange={() => change({ kinds: toggleId(request!.kinds, kind) })}
-              />
-              {kind.replace('_', ' ')}
-            </label>
-          ))}
-          <label>
-            Neighbor direction
-            <select
-              disabled={!request}
-              value={request?.direction ?? 'outgoing'}
-              onChange={(event) =>
-                change({ direction: event.target.value as GraphRequest['direction'] })
-              }
-            >
-              <option value="both">Incoming and outgoing</option>
-              <option value="incoming">Incoming consumers</option>
-              <option value="outgoing">Outgoing dependencies</option>
-            </select>
-          </label>
-          <p className="muted">
-            At most {VIEW_LIMIT} nodes per view. Filters and collapsed branches hide relationships.
-          </p>
         </aside>
         <main>
           <div className="graph-toolbar">
             <button
+              aria-label="Toggle symbols"
+              aria-expanded={explorerOpen}
+              onClick={() => setExplorerOpen(!explorerOpen)}
+            >
+              ☰
+            </button>
+            <div className="graph-modes" role="group" aria-label="Graph mode">
+              <button
+                disabled={!request || busy}
+                aria-pressed={graphMode === 'outgoing'}
+                onClick={() =>
+                  change({ kinds: ['calls'], direction: 'outgoing', groups: {}, internals: [] })
+                }
+              >
+                Calls
+              </button>
+              <button
+                disabled={!request || busy}
+                aria-pressed={graphMode === 'incoming'}
+                onClick={() =>
+                  change({ kinds: ['calls'], direction: 'incoming', groups: {}, internals: [] })
+                }
+              >
+                Callers
+              </button>
+              <button
+                disabled={
+                  !request || busy || !['function', 'method'].includes(focusNode?.kind ?? '')
+                }
+                aria-pressed={graphMode === 'flow'}
+                onClick={() => startFlow(request!.focus)}
+              >
+                Flow
+              </button>
+            </div>
+            <details className="graph-filters">
+              <summary>Filters</summary>
+              <div className="filter-popover">
+                {RELATIONS.map((kind) => (
+                  <label className="checkbox" key={kind}>
+                    <input
+                      type="checkbox"
+                      checked={request?.kinds.includes(kind) ?? kind === 'calls'}
+                      disabled={!request}
+                      onChange={() => change({ kinds: toggleId(request!.kinds, kind) })}
+                    />
+                    {kind.replace('_', ' ')}
+                  </label>
+                ))}
+                <label>
+                  Neighbor direction
+                  <select
+                    disabled={!request}
+                    value={request?.direction ?? 'outgoing'}
+                    onChange={(event) =>
+                      change({ direction: event.target.value as GraphRequest['direction'] })
+                    }
+                  >
+                    <option value="both">Incoming and outgoing</option>
+                    <option value="incoming">Incoming consumers</option>
+                    <option value="outgoing">Outgoing dependencies</option>
+                  </select>
+                </label>
+              </div>
+            </details>
+            <button
+              aria-label="Back"
+              title="Back"
               disabled={!history.length || busy}
               onClick={() => {
                 const previous = history.at(-1)!;
@@ -1124,9 +1206,11 @@ export default function App() {
                 restore(previous);
               }}
             >
-              Back
+              ←
             </button>
             <button
+              aria-label="Forward"
+              title="Forward"
               disabled={!future.length || busy}
               onClick={() => {
                 const next = future.at(-1)!;
@@ -1136,7 +1220,7 @@ export default function App() {
                 restore(next);
               }}
             >
-              Forward
+              →
             </button>
             <button
               disabled={!view}
@@ -1145,7 +1229,7 @@ export default function App() {
                 if (focus) showNode(focus);
               }}
             >
-              Center focus
+              Center
             </button>
             <button
               disabled={!view}
@@ -1162,7 +1246,7 @@ export default function App() {
                 if (bounds) void flow.current?.fitBounds(bounds, { padding: 0.2 });
               }}
             >
-              Fit graph
+              Fit
             </button>
             <button
               disabled={!request}
@@ -1177,7 +1261,14 @@ export default function App() {
                 })
               }
             >
-              Collapse branches
+              Collapse
+            </button>
+            <button
+              disabled={!view}
+              aria-expanded={inspectorOpen}
+              onClick={() => setInspectorOpen(!inspectorOpen)}
+            >
+              Inspect
             </button>
             <span role="status">{statusLabel}</span>
           </div>
@@ -1193,8 +1284,8 @@ export default function App() {
           )}
           {impact && (
             <div className="notice">
-              Hypothetical {impact} change: candidates for inspection, not proven breakage. Dynamic
-              behavior and incomplete coverage may hide effects.
+              Potential {impact} impact · direct candidates, not proven breakage.
+              <button onClick={() => setImpact('')}>Exit impact</button>
             </div>
           )}
           <FlowNavigator
@@ -1271,7 +1362,7 @@ export default function App() {
                 return {
                   ...edge,
                   selected: selected?.id === edge.id,
-                  className:
+                  className: `${edge.className ?? ''} ${
                     paths && !paths.edges.has(edge.id)
                       ? 'dimmed'
                       : view?.edges.some(
@@ -1281,10 +1372,12 @@ export default function App() {
                               candidate.kind === 'control',
                           )
                         ? 'next-operation'
-                        : '',
+                        : ''
+                  }`,
                 };
               })}
               nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
               onInit={(instance) => {
                 flow.current = instance;
               }}
@@ -1315,6 +1408,7 @@ export default function App() {
                   else focusSymbol(fact.parentId ?? fact.id, fact.kind);
                 }
               }}
+              colorMode="dark"
               nodesConnectable={false}
               edgesReconnectable={false}
               deleteKeyCode={null}
@@ -1323,14 +1417,13 @@ export default function App() {
               maxZoom={2}
               onPaneClick={() => {
                 setHovered(undefined);
-                setPinned(false);
               }}
             >
-              <Background gap={24} />
+              <Background gap={24} color="var(--border)" />
               <Controls showInteractive={false} />
-              <MiniMap pannable zoomable />
+              {nodes.length > 12 && <MiniMap pannable zoomable />}
             </ReactFlow>
-            {(hovered || (pinned && selected)) && (
+            {hovered && !inspectorOpen && (
               <div
                 onMouseEnter={() => {
                   if (hoverTimer.current) clearTimeout(hoverTimer.current);
@@ -1340,81 +1433,77 @@ export default function App() {
                 <IdentityCard
                   value={hovered ?? selected!}
                   nodes={view?.nodes ?? []}
-                  pinned={pinned && selected?.id === (hovered ?? selected)?.id}
                   onPin={() => {
                     const value = hovered ?? selected;
                     if (value) select(value);
                   }}
                   onDismiss={() => {
                     setHovered(undefined);
-                    setPinned(false);
                   }}
                 />
               </div>
             )}
             {!view && !busy && (
               <div className="empty">
-                Explore calls, data relationships, and static function behavior.
-                <br />
-                {!isDesktop
-                  ? 'Open the labelled sample to preview the workspace.'
-                  : 'Open a local Go module to analyze its source.'}
+                <strong>{project ? 'Choose a symbol' : 'Open a Go module'}</strong>
+                <p>
+                  {project
+                    ? 'Search or browse declarations to start.'
+                    : 'Use the project menu above.'}
+                </p>
               </div>
             )}
           </div>
-          {project?.diagnostics.length ? (
-            <details className="diagnostics">
-              <summary>Analysis coverage: {project.diagnostics.length} diagnostic(s)</summary>
-              {project.diagnostics.map((diagnostic, index) => (
-                <p key={index}>
-                  {diagnostic.severity}: {diagnostic.message}{' '}
-                  {diagnostic.packageId && `(${diagnostic.packageId})`}
-                </p>
-              ))}
-            </details>
-          ) : project ? (
-            <p className="coverage">
-              No analyzer diagnostics. Static evidence does not establish runtime execution or full
-              dynamic target coverage.
-            </p>
-          ) : null}
         </main>
-        <aside className="inspector">
-          <button className="source-width" onClick={() => setWideSource(!wideSource)}>
-            {wideSource ? 'Compact source panel' : 'Widen source panel'}
-          </button>
-          <EvidenceInspector
-            selected={selected}
-            summary={selectedSummary}
-            view={view}
-            request={request}
-            root={project?.root}
-            busy={busy}
-            impact={impact}
-            excerpt={excerpt}
-            evidence={evidence}
-            callDepth={calls.length}
-            onFocus={focusSymbol}
-            onUsage={(id) => navigate(requestFor(id, 'field'))}
-            onChange={change}
-            onEnter={enterCall}
-            onFollow={startFlow}
-            onReveal={reveal}
-            onSelect={select}
-            onSource={(span) => void inspect(span)}
-            onImpact={(id, category) => {
-              if (request) {
-                navigate({ ...request, focus: id });
-                setImpact(category);
-              }
-            }}
-            onPage={(direction) => {
-              if (request && selectedNode && selectedSummary)
-                navigate(neighborPage(request, selectedNode.id, selectedSummary, direction));
-            }}
-            onShow={showNode}
-          />
-        </aside>
+        {inspectorOpen && (
+          <aside className="inspector">
+            <div className="panel-heading">
+              <button
+                aria-label="Close inspector"
+                onClick={() => {
+                  setInspectorOpen(false);
+                  setHovered(undefined);
+                }}
+              >
+                ×
+              </button>
+              <button className="source-width" onClick={() => setWideSource(!wideSource)}>
+                {wideSource ? 'Narrow' : 'Widen'}
+              </button>
+            </div>
+            <EvidenceInspector
+              selected={selected}
+              summary={selectedSummary}
+              view={view}
+              request={request}
+              root={project?.root}
+              busy={busy}
+              impact={impact}
+              excerpt={excerpt}
+              evidence={evidence}
+              callDepth={calls.length}
+              onFocus={focusSymbol}
+              onUsage={(id) => navigate(requestFor(id, 'field'))}
+              onChange={change}
+              onEnter={enterCall}
+              onFollow={startFlow}
+              onReveal={reveal}
+              onSelect={select}
+              onSource={(span) => void inspect(span)}
+              onImpact={(id, category) => {
+                if (request) {
+                  navigate({ ...request, focus: id });
+                  setImpact(category);
+                }
+              }}
+              onPage={(direction) => {
+                if (request && selectedNode && selectedSummary)
+                  navigate(neighborPage(request, selectedNode.id, selectedSummary, direction));
+              }}
+              onShow={showNode}
+            />
+          </aside>
+        )}
       </div>
     </div>
   );

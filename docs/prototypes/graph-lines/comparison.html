@@ -1,0 +1,106 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body {
+        margin: 0;
+        font: 14px var(--font-sans, system-ui);
+        color: var(--foreground, #d8dee9);
+        background: var(--background, #191c23);
+      }
+      nav {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin-bottom: 12px;
+      }
+      button {
+        font: inherit;
+        background: var(--secondary, #2e3440);
+        color: inherit;
+        border: 1px solid var(--border, #434c5e);
+        border-radius: 6px;
+        padding: 8px 10px;
+        cursor: pointer;
+      }
+      button[aria-pressed='true'] {
+        color: #88c0d0;
+        border-color: #81a1c1;
+      }
+      img {
+        display: block;
+        width: 100%;
+        border-radius: 5px;
+      }
+      p {
+        font-size: 13px;
+        line-height: 1.5;
+        color: var(--muted-foreground, #adb5c4);
+        margin: 10px 0;
+      }
+      aside {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        margin-top: 12px;
+      }
+      aside button {
+        padding: 3px;
+      }
+      aside span {
+        display: block;
+        font-size: 11px;
+        padding: 5px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <nav>
+      <button onclick="show(0)" aria-pressed="false">1 · Straight routed</button
+      ><button onclick="show(1)" aria-pressed="false">2 · Rounded routed</button
+      ><button onclick="show(2)" aria-pressed="true">3 · Original curves</button>
+    </nav>
+    <img
+      id="large"
+      src="03-original-bezier.png"
+      alt="Original free curves with the structured node layout"
+    />
+    <p id="caption">
+      Original Bézier curves. Smooth fan-out; connections can pass behind intermediate nodes.
+    </p>
+    <aside>
+      <button onclick="show(0)">
+        <img src="01-square-routed.png" alt="Straight routed lines" /><span
+          >Straight routed</span
+        ></button
+      ><button onclick="show(1)">
+        <img src="02-rounded-routed.png" alt="Rounded routed lines" /><span
+          >Rounded routed</span
+        ></button
+      ><button onclick="show(2)">
+        <img src="03-original-bezier.png" alt="Original Bézier curves" /><span
+          >Original curves</span
+        >
+      </button>
+    </aside>
+    <p>Same LLM Gate data, node positions, colors, and zoom in every image.</p>
+    <script>
+      const shots = ['01-square-routed.png', '02-rounded-routed.png', '03-original-bezier.png'];
+      const captions = [
+        'Straight routed lines. Square bends and separate lanes around nodes.',
+        'Rounded routed lines. An alternative with soft bends and paths around nodes.',
+        'Original Bézier curves. Smooth fan-out; connections can pass behind intermediate nodes.',
+      ];
+      function show(i) {
+        document.getElementById('large').src = shots[i];
+        document.getElementById('large').alt = captions[i];
+        document.getElementById('caption').textContent = captions[i];
+        document
+          .querySelectorAll('nav button')
+          .forEach((b, n) => b.setAttribute('aria-pressed', String(n === i)));
+      }
+    </script>
+  </body>
+</html>

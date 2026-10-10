@@ -74,3 +74,52 @@ The analyzer now checks parser inputs and verifies the input set before publicat
 The review also identified partial roadmap requirements. Automatic file watching, detailed value flow, broader internal control semantics, transitive impact, and production performance budgets remain outside this initial slice. The implementation notes record those limits.
 
 The three correctness fixes passed their regression checks at the recorded revision. The roadmap requirements remain incomplete. See [current analysis scope](implementation-notes.md) for subsequent capabilities and limits.
+
+## Horizontal layout check, 2026-10-10
+
+LLM Gate was used as a read-only reference project. Its `main` call neighborhood contains nine nodes and eight edges. The previous layout occupied 520 × 1,019 layout units, with five nodes visible on initial focus at a 1,440 × 900 window. The revised layout occupies 1,120 × 653 units. All nine nodes are visible at 100% zoom.
+
+The layout limits sibling layers to three nodes and uses a smaller vertical gap. Initial focus frames a neighborhood when it fits at 80% zoom or higher; larger views retain readable focus centering. Columns describe graph placement, not execution order.
+
+Checks passed:
+
+- All 39 frontend tests, including outgoing and incoming fan-out, cycles, shared targets, group containment, position reuse, and initial framing.
+- TypeScript, production frontend build, and native Linux release build without installer packaging.
+- Browser checks using the real analyzer and Rust backend through a temporary local bridge: source inspection, expansion to 17 nodes, function behavior with 27 nodes and 34 edges, navigation back to Calls, and overflow checks at widths of 1,280 and 960 pixels. No browser errors were observed.
+- Three native background cycles of expansion, behavior, refocus, and collapse through Tauri IPC, WebKit, the layout worker, and React DOM commit. The run completed without timeout or stderr diagnostics. These checks exclude displayed frames and foreground frame timing.
+- SHA-256 and Git status comparison of all 22 tracked and nonignored reference files. LLM Gate was unchanged.
+
+The native run's raw report is the ignored local file `benchmark-results/latest.json`. It records a smoke check, not a release performance budget.
+
+## Routed lines and dark palette check, 2026-10-10
+
+The renderer now uses ELK's orthogonal edge sections, including container offsets for nested behavior and cross-boundary calls. Focus translation moves nodes, edge sections, and labels together. Individual saved node positions are no longer reused because they would invalidate the obstacle routes.
+
+The application palette matches the active Omarchy `colors.toml`: Nord backgrounds, foreground, and accents. CSS, React Flow, and the native window explicitly use dark mode.
+
+Checks passed:
+
+- All 39 frontend tests. Route checks cover outgoing and incoming fan-out, shared targets, cycles, nested behavior, and old manual positions.
+- Production frontend and native release builds.
+- Real LLM Gate geometry: 22 segments in the initial view, 44 in the expanded view, and 96 in Flow. None crossed unrelated leaf-node interiors.
+- Browser checks under a light system preference: dark backgrounds, distinct connection colors, hover labels, selected-edge color, crossing masks, source evidence, expansion, and Flow navigation. No browser errors occurred.
+- Three native background cycles of expansion, behavior, refocus, and collapse completed without timeout or stderr diagnostics. These checks exclude displayed frames.
+- Standards and behavior review found no actionable issues.
+
+Manual dragging clears obstacle routes and uses endpoint routing until the next graph query. The next query restores automatic node placement.
+
+## Intermediate rounded call paths check, 2026-10-10
+
+This intermediate design was tested before the original Bézier curves were selected. Its rounding helper and two tests have since been removed. The final behavior and checks are recorded below.
+
+Calls and Callers in this intermediate design rounded the bends of ELK's routed paths. Flow keeps right-angle bends, including its dependency connections. Rounding is limited to 12 layout units and half the length of either neighboring segment, so short segments cannot overshoot. Both modes retain the Nord palette, crossing masks, arrows, and label behavior.
+
+All 41 frontend tests passed, including separate sections, unchanged endpoints, reverse-direction bends, short segments, and repeated points. Production frontend and native release builds passed. The LLM Gate browser check confirmed rounded call paths avoided unrelated nodes, Flow paths retained square bends, and source inspection and expansion still worked. Dark mode, colors, hover labels, and selection checks passed with no browser errors. LLM Gate's 22 file hashes and Git status remained unchanged.
+
+## Final call curves check, 2026-10-10
+
+The three line-style images were compared with identical LLM Gate node positions, colors, and zoom. Calls and Callers now use the original Bézier curves between node handles. These curves can pass behind intermediate nodes. Flow retains square ELK routes around nodes. Nord colors, crossing masks, hover labels, and selection highlights apply in both modes.
+
+The unused corner-rounding helper and its two tests were removed. All 39 remaining frontend tests passed. TypeScript, production frontend, native release build, formatting, and diff checks passed. Browser checks confirmed original call curves, square Flow routes, source inspection, neighbor expansion, dark mode under a light system preference, hover labels, and selection colors. No browser errors were observed.
+
+Three native background cycles of expansion, behavior, refocus, and collapse completed without timeout or stderr diagnostics. These checks exclude displayed frames. LLM Gate remained unchanged, confirmed by matching all 22 file hashes and Git status.

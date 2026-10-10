@@ -1,3 +1,4 @@
+import type { DisplayBounds } from './layout/bounds';
 import type { GraphRequest, GraphView, ViewEdge, ViewNode } from './shared/protocol';
 
 export interface Viewport {
@@ -128,12 +129,27 @@ export function revealRegion(request: GraphRequest, node: ViewNode): GraphReques
   };
 }
 
-// Pan and zoom are independent of graph extent. Initial navigation centers only the focus.
+// Fit a small initial neighborhood when labels stay readable; otherwise center the focus.
 export function focusViewport(
   position: { x: number; y: number },
   width: number,
   canvas: { width: number; height: number },
+  neighborhood?: DisplayBounds,
 ): Viewport {
+  if (neighborhood) {
+    const zoom = Math.min(
+      1,
+      canvas.width / (neighborhood.width + 80),
+      canvas.height / (neighborhood.height + 80),
+    );
+    if (zoom >= 0.8)
+      return {
+        x: canvas.width / 2 - (neighborhood.x + neighborhood.width / 2) * zoom,
+        y: canvas.height / 2 - (neighborhood.y + neighborhood.height / 2) * zoom,
+        zoom,
+      };
+  }
+
   const zoom = 1;
   return {
     x: canvas.width / 2 - (position.x + width / 2) * zoom,

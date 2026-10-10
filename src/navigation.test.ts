@@ -243,3 +243,17 @@ describe('navigation across disclosure, calls, and snapshots', () => {
     expect(refreshNavigation(state, 'before', 'before')).toBe(state);
   });
 });
+
+it('frames a wide neighborhood at readable zoom and keeps the focus readable for oversized graphs', () => {
+  const canvas = { width: 1230, height: 788 };
+  const neighborhood = { x: 0, y: 0, width: 1160, height: 700 };
+  const viewport = focusViewport({ x: 0, y: 0 }, 220, canvas, neighborhood);
+  expect(viewport.zoom).toBeGreaterThanOrEqual(0.8);
+  expect(viewport.x).toBeGreaterThanOrEqual(0);
+  expect(viewport.y).toBeGreaterThanOrEqual(0);
+  expect(viewport.x + neighborhood.width * viewport.zoom).toBeLessThanOrEqual(canvas.width);
+  expect(viewport.y + neighborhood.height * viewport.zoom).toBeLessThanOrEqual(canvas.height);
+  expect(focusViewport({ x: 1000, y: 500 }, 220, canvas, { ...neighborhood, width: 5000 })).toEqual(
+    focusViewport({ x: 1000, y: 500 }, 220, canvas),
+  );
+});
