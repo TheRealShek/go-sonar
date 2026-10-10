@@ -509,3 +509,54 @@ fn discovery_and_browsing_page_canonical_local_declarations() {
     assert!(store.browse("unknown", "", 0).is_err());
     assert!(store.relation_sites("a", "b", "unknown", 0).is_err());
 }
+
+#[test]
+fn long_behavior_projection_is_bounded_with_and_without_a_distant_anchor() {
+    for count in [1000, 4000] {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let mut pkg = package(root, "p", &["long"], &[]);
+        let source = serde_json::to_value(&pkg.symbols[0].source).unwrap();
+        let nodes: Vec<_> = (0..count+2).map(|i| json!({
+   "id":format!("long/behavior/{i}"), "kind": if i==0 {"entry"} else if i==count+1 {"exit"} else {"operation"},
+   "label":format!("operation {i}"),"source":source
+  })).collect();
+        let edges: Vec<_> = (0..count+1).map(|i| json!({"id":format!("edge/{i}"),"source":format!("long/behavior/{i}"),"target":format!("long/behavior/{}",i+1),"kind":"control","label":"next"})).collect();
+        pkg.behaviors = vec![
+            serde_json::from_value(json!({"symbolId":"long","nodes":nodes,"edges":edges})).unwrap(),
+        ];
+        let mut store = GraphStore::memory(root).unwrap();
+        store.apply(&batch(root, vec![pkg], true)).unwrap();
+        let mut req = request("long", &[], 80, Direction::Outgoing);
+        req.internals = vec!["long".into()];
+        for anchored in [false, true] {
+            if anchored {
+                req.behavior_anchors
+                    .insert("long".into(), format!("long/behavior/{count}"));
+            }
+            let mut times = vec![];
+            for _ in 0..3 {
+                let began = std::time::Instant::now();
+                let view = store.graph(&req).unwrap();
+                times.push(began.elapsed());
+                assert!(view.nodes.len() <= 38);
+                assert!(view.nodes.iter().any(|n| n.kind == "entry"));
+                assert!(view.nodes.iter().any(|n| n.kind == "boundary"));
+                assert!(view.behaviors[0].hidden_nodes > 0);
+                if anchored {
+                    assert!(
+                        view.nodes
+                            .iter()
+                            .any(|n| n.id == format!("long/behavior/{count}"))
+                    );
+                }
+                valid_endpoints(&view);
+            }
+            times.sort();
+            println!(
+                "{count} statements, anchored={anchored}: median {:?}",
+                times[1]
+            );
+        }
+    }
+}

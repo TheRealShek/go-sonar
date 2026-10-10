@@ -277,6 +277,11 @@ impl GraphStore {
             });
             return Ok(());
         };
+        let facts: HashMap<&str, &BehaviorNode> = behavior
+            .nodes
+            .iter()
+            .map(|node| (node.id.as_str(), node))
+            .collect();
         let mut nodes: HashMap<String, ViewNode> = behavior
             .nodes
             .iter()
@@ -313,7 +318,7 @@ impl GraphStore {
                         break;
                     };
                     let next = edges[0].target.as_str();
-                    let Some(next_node) = behavior.nodes.iter().find(|n| n.id == next) else {
+                    let Some(next_node) = facts.get(next) else {
                         break;
                     };
                     if !linear(next_node)
@@ -415,6 +420,13 @@ impl GraphStore {
                 hidden_target_id: None,
             });
         }
+        let mut control_successors: HashMap<&str, Vec<&Relation>> = HashMap::new();
+        for edge in edges.iter().filter(|edge| edge.kind == "control") {
+            control_successors
+                .entry(edge.source.as_str())
+                .or_default()
+                .push(edge);
+        }
         if let (Some(entry), Some(anchor)) = (&entry, anchor) {
             let target = projection.get(anchor).unwrap_or(anchor);
             let mut search = VecDeque::from([entry.clone()]);
@@ -423,10 +435,7 @@ impl GraphStore {
                 if id == *target {
                     break;
                 }
-                for edge in edges
-                    .iter()
-                    .filter(|e| e.kind == "control" && e.source == id)
-                {
+                for edge in control_successors.get(id.as_str()).into_iter().flatten() {
                     if !previous.contains_key(&edge.target) {
                         previous.insert(edge.target.clone(), id.clone());
                         search.push_back(edge.target.clone());
@@ -457,10 +466,7 @@ impl GraphStore {
             if !shown.insert(id.clone()) {
                 continue;
             }
-            for edge in edges
-                .iter()
-                .filter(|e| e.kind == "control" && e.source == id)
-            {
+            for edge in control_successors.get(id.as_str()).into_iter().flatten() {
                 queue.push_back(edge.target.clone());
             }
         }
