@@ -122,6 +122,36 @@ impl Backend {
         index.search(query, limit)
     }
 
+    /// Browse declarations without sending the whole symbol index.
+    pub fn browse(&self, kind: &str, package: &str, offset: usize) -> Result<crate::SymbolPage> {
+        let store = self.store.lock().map_err(|_| Error::State)?;
+        store
+            .as_ref()
+            .ok_or(Error::NoProject)?
+            .browse(kind, package, offset)
+    }
+
+    /// Discover entries and package names for the opening guide.
+    pub fn discovery(&self) -> Result<crate::Discovery> {
+        let store = self.store.lock().map_err(|_| Error::State)?;
+        store.as_ref().ok_or(Error::NoProject)?.discovery()
+    }
+
+    /// Inspect all occurrences behind a grouped connection in bounded pages.
+    pub fn relation_sites(
+        &self,
+        source: &str,
+        target: &str,
+        kind: &str,
+        offset: usize,
+    ) -> Result<crate::RelationSites> {
+        let store = self.store.lock().map_err(|_| Error::State)?;
+        store
+            .as_ref()
+            .ok_or(Error::NoProject)?
+            .relation_sites(source, target, kind, offset)
+    }
+
     /// Return a bounded graph, without holding a lock during Go analysis.
     pub fn graph(&self, request: &GraphRequest) -> Result<GraphView> {
         let store = self.store.lock().map_err(|_| Error::State)?;

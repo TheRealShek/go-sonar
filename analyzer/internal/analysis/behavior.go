@@ -15,10 +15,11 @@ type flow struct {
 func (f *flow) node(kind, label string, n ast.Node) string {
 	id := fmt.Sprintf("%s/behavior/%d", f.behavior.SymbolID, len(f.behavior.Nodes))
 	f.behavior.Nodes = append(f.behavior.Nodes, Node{
-		ID:     id,
-		Kind:   kind,
-		Label:  label,
-		Source: f.extractor.span(n),
+		ID:      id,
+		Kind:    kind,
+		Label:   label,
+		Source:  f.extractor.span(n),
+		Details: f.extractor.operation(kind, n),
 	})
 	return id
 }
@@ -239,7 +240,7 @@ func (f *flow) statement(stmt ast.Stmt, next, breakTo, continueTo string) string
 		for i := len(s.Call.Args) - 1; i >= 0; i-- {
 			first = f.expression(s.Call.Args[i], first)
 		}
-		return first
+		return f.expression(s.Call.Fun, first)
 
 	case *ast.GoStmt:
 		id := f.node("operation", "start goroutine: "+f.extractor.label(s.Call), s)
@@ -249,7 +250,7 @@ func (f *flow) statement(stmt ast.Stmt, next, breakTo, continueTo string) string
 		for i := len(s.Call.Args) - 1; i >= 0; i-- {
 			first = f.expression(s.Call.Args[i], first)
 		}
-		return first
+		return f.expression(s.Call.Fun, first)
 
 	case *ast.TypeSwitchStmt, *ast.SelectStmt, *ast.LabeledStmt:
 		id := f.node("operation", "control flow not expanded: "+f.extractor.label(s), s)

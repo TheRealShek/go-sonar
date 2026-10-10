@@ -76,6 +76,8 @@ fn request(focus: &str, expanded: &[&str], limit: usize, direction: Direction) -
         limit,
         direction,
         offsets: Default::default(),
+        neighbor_limit: 40,
+        ..Default::default()
     }
 }
 
@@ -423,4 +425,87 @@ fn empty_relationship_filters_hide_all_external_edges() {
     assert_eq!(view.nodes.len(), 1);
     assert!(view.edges.is_empty());
     assert_eq!(view.summaries[0].hidden, 2);
+}
+
+#[test]
+fn repeated_sites_share_a_connection_and_omission_counts_remain_disjoint() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let mut facts = package(root, "p", &["a", "b", "c"], &[("a", "b"), ("a", "c")]);
+    for i in 1..65 {
+        let mut site = facts.edges[0].clone();
+        site.id = format!("a:b:site:{i:03}");
+        site.evidence.line = i;
+        site.expression = format!("b({i})");
+        facts.edges.push(site);
+    }
+    let mut read = facts.edges[1].clone();
+    read.id = "read-c".into();
+    read.kind = "reads".into();
+    facts.edges.push(read);
+    let mut store = GraphStore::memory(root).unwrap();
+    store.apply(&batch(root, vec![facts], true)).unwrap();
+    let mut query = request("a", &[], 80, Direction::Outgoing);
+    query.neighbor_limit = 1;
+    let first = store.graph(&query).unwrap();
+    assert_eq!(first.nodes.len(), 2);
+    assert_eq!(first.edges.len(), 1);
+    assert_eq!(first.edges[0].site_count, 65);
+    assert_eq!(first.edges[0].sites.len(), 40);
+    assert_eq!(
+        store
+            .relation_sites("a", "b", "calls", 40)
+            .unwrap()
+            .sites
+            .len(),
+        25
+    );
+    let summary = &first.summaries[0];
+    assert_eq!(summary.distinct_symbols, 2);
+    assert_eq!(summary.filtered, 1);
+    assert_eq!(summary.paginated, 1);
+    assert_eq!(
+        summary.hidden,
+        summary.filtered + summary.collapsed + summary.paginated + summary.limited
+    );
+    query.limit = 1;
+    let limited = store.graph(&query).unwrap();
+    let summary = &limited.summaries[0];
+    assert_eq!(summary.limited, 65);
+    assert_eq!(
+        summary.hidden,
+        summary.filtered + summary.collapsed + summary.paginated + summary.limited
+    );
+    query.limit = 80;
+    query.groups.insert(
+        "a".into(),
+        sonar_core::NeighborFilter {
+            package_id: "p".into(),
+            kind: "reads".into(),
+            direction: "outgoing".into(),
+        },
+    );
+    query.kinds = vec!["calls".into(), "reads".into()];
+    let reads = store.graph(&query).unwrap();
+    assert_eq!(reads.edges.len(), 1);
+    assert_eq!(reads.edges[0].kind, "reads");
+    assert_eq!(reads.summaries[0].collapsed, 66);
+}
+
+#[test]
+fn discovery_and_browsing_page_canonical_local_declarations() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let mut facts = package(root, "p", &["a", "main", "Record"], &[]);
+    facts.symbols[2].kind = "struct".into();
+    let mut store = GraphStore::memory(root).unwrap();
+    store.apply(&batch(root, vec![facts], true)).unwrap();
+    assert_eq!(store.discovery().unwrap().entrypoints[0].name, "main");
+    assert_eq!(
+        store.browse("struct", "p", 0).unwrap().symbols[0].name,
+        "Record"
+    );
+    assert_eq!(store.browse("struct", "other", 0).unwrap().total, 0);
+    assert!(store.browse("unknown", "", 0).is_err());
+    assert!(store.relation_sites("a", "b", "unknown", 0).is_err());
 }

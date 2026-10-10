@@ -2,7 +2,7 @@
 
 ## Status
 
-Incremental analysis, bounded rendering, and benchmarks covering indexing, expansion latency, and total application memory are approved requirements. This document defines work to verify; no benchmark has been executed and no performance result is claimed.
+Incremental analysis, bounded rendering, and benchmarks covering indexing, expansion latency, and total application memory are approved requirements. This document defines measurement and release requirements. Initial smoke benchmarks have been executed and are recorded in [Validation](validation.md). They do not establish release budgets or performance on production repositories.
 
 Numerical latency, memory, and payload budgets are not yet selected. Set and record them against representative workloads before accepting a release. Choosing Rust does not substitute for measurement.
 
@@ -32,10 +32,10 @@ Separate current display data from bounded layout metadata and saved exploration
 
 Use repeatable Go fixtures representing a small project, a medium multi-package project, and a large dependency graph. Include high fan-out, nested function behavior, shared dependencies, interface calls, and cycles. Record fixture revisions, file and symbol counts, dependency state, and build configuration.
 
-For each workload, measure:
+The following is the required workload coverage, including scenarios the current harness does not yet establish. For each workload, measure:
 
-- Cold indexing with an empty application index and a prepared offline Go toolchain and dependency cache.
-- Warm project opening with reusable analysis.
+- Initial indexing with an empty application index and a prepared offline Go toolchain and dependency cache.
+- Warm project opening with a disk index, while accounting for the initial Go source analysis that the current helper still performs.
 - A function-body edit and an unrelated package that should remain reusable.
 - A shared declaration edit that affects consumers.
 - Symbol search, first expansion, further expansion, and function-internal expansion.
@@ -46,11 +46,11 @@ Use normal optimized application builds for acceptance measurements. Debug build
 
 ## Time measurements
 
-Record initial indexing time through a usable published snapshot. For incremental analysis, measure from change detection through publication of consistent updated facts. Report stage times so Go loading, extraction, Rust ingestion, and query processing can be distinguished.
+Record initial indexing time through a usable published snapshot. For the current manual refresh, measure from the refresh request through publication of consistent updated facts. If file watching is added, also measure from change detection. Report stage times so Go loading, extraction, Rust ingestion, and query processing can be distinguished.
 
 Measure expansion from the user's request through a visible rendered result, including the Rust query, transport, layout, and frontend update. Backend response time alone is not the expansion latency the user experiences.
 
-Repeat runs and record the sample count, median, and tail latency with the chosen calculation method. Distinguish cold and warm runs. Make first-response time and complete-result time explicit when results arrive progressively.
+Repeat runs and record the sample count, median, and tail latency with the chosen calculation method. Distinguish fresh application state, warm application state, and filesystem/toolchain cache conditions. Make first-response time and complete-result time explicit when results arrive progressively.
 
 ## Memory measurements
 
@@ -69,3 +69,9 @@ Each record includes application revision, build mode, operating system, WebView
 Record the agreed budgets and the comparison against them. Functional acceptance also requires correct incremental results, bounded renderer data, and a layout adapter independent of the canonical graph model.
 
 No architecture component gets an assumed performance pass. A slow Go analyzer, expensive layout, growing frontend state, or excess Rust allocations are all application performance issues. Use the measured cause to guide changes, including replacement of ELK when warranted.
+
+## Reproduce current measurements
+
+Use the optimized builds and commands in the [development guide](development.md#run-benchmarks). Headless results exclude layout and rendering. Foreground desktop results include frame publication; background commit results explicitly exclude it. Keep those measurements separate.
+
+The current sampler uses 25 ms intervals and can miss brief peaks. Existing runs retain Go toolchain and OS file caches. Broader production workloads, repeated tail-latency measurements, sustained memory checks, and numerical release budgets remain unfinished.

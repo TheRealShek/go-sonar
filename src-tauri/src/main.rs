@@ -144,6 +144,60 @@ async fn source_excerpt(state: State<'_>, source: SourceSpan) -> Result<SourceEx
     result.map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn browse_symbols(
+    state: State<'_>,
+    kind: String,
+    package: String,
+    offset: usize,
+) -> Result<sonar_core::SymbolPage, String> {
+    let backend = Arc::clone(state.inner());
+    tauri::async_runtime::spawn_blocking(move || backend.browse(&kind, &package, offset))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn discover_project(state: State<'_>) -> Result<sonar_core::Discovery, String> {
+    let backend = Arc::clone(state.inner());
+    tauri::async_runtime::spawn_blocking(move || backend.discovery())
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn relation_sites(
+    state: State<'_>,
+    source: String,
+    target: String,
+    kind: String,
+    offset: usize,
+) -> Result<sonar_core::RelationSites, String> {
+    let backend = Arc::clone(state.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        backend.relation_sites(&source, &target, &kind, offset)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn choose_project_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("Choose a Go module folder")
+            .blocking_pick_folder()
+            .map(|p| p.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
 /// Resolve only the packaged helper or a developer-specified trusted executable.
 fn analyzer_path() -> std::io::Result<PathBuf> {
     if let Some(path) = std::env::var_os("GO_SONAR_ANALYZER") {
@@ -182,6 +236,7 @@ fn analyzer_path() -> std::io::Result<PathBuf> {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let cache = if benchmark_config()?.is_some() {
                 std::env::var_os("GO_SONAR_BENCHMARK_CACHE_DIR")
@@ -201,6 +256,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             open_project,
             refresh_project,
             search_symbols,
+            browse_symbols,
+            discover_project,
+            relation_sites,
+            choose_project_folder,
             graph_view,
             impact_view,
             source_excerpt,

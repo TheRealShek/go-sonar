@@ -67,6 +67,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         limit: 80,
         direction: Direction::Both,
         offsets: Default::default(),
+        neighbor_limit: 40,
+        ..Default::default()
     };
 
     for phase in ["neighborhood", "expanded", "internals"] {

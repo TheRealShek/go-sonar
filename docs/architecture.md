@@ -1,77 +1,63 @@
 # Architecture
 
-## Status and authority
+Go Sonar uses Tauri, React Flow, a Rust application core, and a local Go analyzer. ELK.js computes layout through a replaceable adapter. These boundaries are approved; the current implementation uses SQLite for the index and a bundled worker for layout.
 
-The user approved Tauri + React Flow + Rust + a Go analyzer, subject to incremental analysis, bounded rendering, and whole-application performance benchmarks. ELK.js is an acceptable starting layout engine and must remain replaceable.
+This document explains component responsibilities and required boundaries. [Implementation notes](implementation-notes.md) record current coverage and limitations. [ADR 0001](adr/0001-desktop-and-analysis-boundaries.md) records the decision and its trade-offs.
 
-This document specifies intended responsibilities and boundaries. It does not describe an implementation that already exists.
+## Components
 
-## Approved components
+### Desktop and frontend
 
-### Tauri desktop application
+Tauri hosts the native app and connects React to Rust through desktop commands. React, TypeScript, and Vite provide the frontend; React Flow displays symbols, connections, and nested function groups.
 
-Tauri hosts the desktop workspace and connects the frontend to the Rust core. The application and its resources operate locally. Source analysis does not run the project's application or tests.
+The frontend owns interaction, selection, exploration history, flow navigation, and viewport state. It requests bounded views rather than receiving the complete source index. Browser preview uses labelled illustrative data; the desktop uses the real analyzer.
 
-### React Flow presentation
+### Rust core
 
-React Flow presents symbols, labelled relationships, and visually grouped function internals. The frontend handles interaction and requests expansions; it does not receive or query the complete repository graph.
+Rust owns the SQLite index, transactional publication, search, graph projection, filtering, grouping, source inspection, potential-impact queries, and the analyzer lifecycle.
 
-React with TypeScript and Vite is the frontend recommendation. Exact versions and secondary UI libraries are not frozen by the architecture approval.
+Queries return one published snapshot. During analysis, queries can continue against the previous snapshot. Publication holds the index lock so a response cannot combine facts from before and after an update.
 
-### Rust application core
-
-Rust owns the indexed source facts, graph queries, search, traversal, filtering, grouping, impact exploration, cache policy, and analyzer lifecycle. It derives bounded views for the current exploration and tracks the source snapshot associated with results.
-
-The core decides what is available for display and retains the codebase index behind its query interface. Keeping the core in Rust is a responsibility decision, not proof of latency or memory performance.
+The index remains behind the query interface. Keeping this work in Rust does not establish a latency or memory budget by itself.
 
 ### Go analyzer
 
-A local Go analyzer supplies language-specific facts, types, source evidence, and internal function behavior. Rust coordinates its work and imports results into the index.
+The persistent Go helper loads packages with Go tooling and extracts syntax, type-resolved relationships, source evidence, and static behavior facts. Rust imports changed package facts into the index.
 
-The working analysis approach uses Go package loading, syntax trees, type information, and control-flow analysis. Deeper SSA and call-target analysis are added when required coverage justifies their cost; they must not become an unconditional whole-program startup task.
+The helper retains file and declaration fingerprints, rather than a second full graph. Body edits usually update one package. Shared declaration and source-location changes can invalidate reverse consumers. A full snapshot after a new session or configuration change removes obsolete cached packages.
 
-Go analysis remains potentially expensive. It needs incremental reuse, controlled concurrency, explicit diagnostics, and measurement alongside the Rust core.
+Analysis does not run the project's application, tests, or generators. Package loading can invoke Go compilation tools. Downloads and custom package drivers are disabled; dependencies must exist locally.
 
-### Replaceable layout engine
+SSA, alias analysis, and complete dynamic call-target analysis are not part of the current implementation. Add deeper analysis only where required coverage justifies its cost.
 
-ELK.js is the initial layout engine, with a local worker as the proposed execution model. Layout operates on a bounded display scope and remains separate from source analysis.
+### Layout
 
-The canonical graph model records identities, symbol kinds, relationship meanings, source evidence, and analysis scope. It must not contain ELK-specific option names, React Flow node objects, or assumptions that a particular layout engine defines a relationship.
+A local dedicated worker runs ELK behind an engine-independent contract. Layout receives bounded topology, dimensions, groups, and placement information and returns geometry.
 
-Define an engine-independent layout request containing the necessary identities, dimensions, groups, connection endpoints, and position constraints. A layout result contains geometry, such as node bounds and edge paths. Engine adapters translate between this contract and the chosen layout library.
+Source facts contain no ELK options or React Flow objects. Replacing the adapter must not require rebuilding the index or changing relationship meanings. Exploration state remains meaningful across a layout change.
 
-Exploration state, including focus, filters, expansion, history, and pinned positions, remains meaningful if the layout adapter changes. Replacing ELK must not require rebuilding the source index or changing relationship semantics.
-
-Stable incremental placement, group resizing, and routing across function boundaries still require validation. An engine change can alter geometry without changing code facts.
+Worker replacement bounds obsolete layout work. Geometry and native WebKit compatibility require their own verification; browser tests alone do not establish native behavior.
 
 ## Data boundaries
 
-The frontend requests a symbol, relationship category, function expansion, or other bounded view. Rust returns the current display projection and its snapshot identity. Further relationships stay queryable in the core and appear only when requested.
+The analyzer uses versioned, line-delimited JSON over stdin and stdout. Logs use stderr. Rust and the frontend communicate through Tauri commands. The [implementation contract](implementation-contract.md) describes the messages and query options.
 
-Renderer payloads contain only the visible nodes, edges, and summaries needed for that display. Collapsed detail and unrequested repository relationships are not hydrated into React Flow and then hidden. Viewport handling must preserve meaningful boundary connections through the necessary endpoints or lightweight boundary representations.
+Rust sends only the requested visible projection, including bounded summaries and evidence. Unrequested or collapsed repository detail stays in the index. Panning outside the viewport does not by itself remove nodes from that projection.
 
-Layout requests may carry bounded structural metadata needed to place the display scope. They do not carry the full repository graph or duplicate source bodies and semantic analysis state. Layout metadata and React Flow renderer payloads are distinct contracts.
+Layout metadata, renderer payloads, and saved exploration history have separate purposes and bounds. None should retain an unbounded second copy of the repository graph.
 
-The proposed transport is Tauri commands and channels between the frontend and Rust, with versioned messages over stdin/stdout between Rust and the Go analyzer. Requests and results need identities, snapshot information, errors, and cancellation handling so obsolete work does not overwrite newer analysis.
+Requests and results carry identities and snapshot information. Superseded frontend work must not overwrite a newer view. Serialized analysis and bounded query queues prevent concurrent requests from creating unlimited pending work.
 
-Storage format and frontend state libraries remain implementation choices. SQLite with Rust-owned access and a small frontend exploration store are working recommendations, not additional approved architecture constraints.
+## Refresh and failures
 
-## Incremental updates
+Refresh is currently manual. The analyzer identifies changed inputs, recomputes affected packages, and reuses unaffected facts. Module or build configuration changes can legitimately require a broader update than a body edit.
 
-For an edit, identify changed source and invalidate the facts that depend on it. Go package semantics may require checking more than the edited file; changes to shared declarations can require updating consumers as well.
+Rust applies replacements and deletions atomically. Transport or persistence failures discard the helper session so retries resend uncommitted facts. Invalid source must produce diagnostics and incomplete coverage rather than publish old affected facts as current.
 
-Recompute affected facts and reuse valid facts outside that scope. Remove obsolete declarations and relationships, refresh source locations, and publish a consistent new snapshot. Results from an older request must not replace newer facts.
+The analyzer verifies source consistency before publication. Source inspection checks the snapshot fingerprint and confines reads to the active module. Edits to external local dependencies require a restart under the current analysis scope.
 
-Dependency tracking and invalidation must account for source changes, declarations, package relationships, build configuration, and relevant tool versions. Broad changes to workspace or module configuration can legitimately affect more scope than a function-body edit. Correctness determines that scope; clearing the full index is not the normal edit path.
+## Performance requirements
 
-Invalid source, unavailable dependencies, cancellation, or analyzer failure must leave a clearly marked incomplete or stale view. The system must not silently present stale relationships as current or fall back to a full reindex without reporting the reason.
+The UI requests at most 80 nodes per graph view. Rust also enforces node, edge, expansion, and function-group limits. Pagination and region summaries keep omitted detail discoverable.
 
-The exact invalidation algorithm and cache keys need implementation validation. Incremental analysis is a required outcome, not a promise that all edits can be analyzed one file at a time.
-
-## Performance boundary
-
-Only the requested exploration crosses into the UI. Use bounded responses, caches, task concurrency, and pending work. Cancellation and backpressure must prevent rapid expansion or edits from creating an unbounded work queue.
-
-All application processes count toward performance measurement, including Go analysis and WebView work. Running layout in a worker prevents that work from occupying the UI thread but does not eliminate its CPU or memory cost.
-
-The benchmark plan and acceptance requirements are in [Performance requirements](performance.md). The durable stack decision is recorded in [ADR 0001](adr/0001-desktop-and-analysis-boundaries.md).
+Measure the whole process tree, including Go tooling and WebKit. A layout worker avoids doing layout on the UI thread but still consumes CPU and memory. See [Performance requirements](performance.md) for measurement rules and unfinished release criteria.

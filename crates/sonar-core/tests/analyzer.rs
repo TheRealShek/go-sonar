@@ -45,6 +45,8 @@ fn real_helper_indexes_demo_and_reuses_unchanged_packages() {
             limit: 100,
             direction: Direction::Both,
             offsets: Default::default(),
+            neighbor_limit: 40,
+            ..Default::default()
         })
         .unwrap();
 

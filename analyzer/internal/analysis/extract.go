@@ -17,6 +17,7 @@ type extractor struct {
 	facts   Facts
 	ids     map[types.Object]string
 	symbols map[string]bool
+	parents map[ast.Node]ast.Node
 }
 
 func (x *extractor) span(n ast.Node) Span {
@@ -123,6 +124,12 @@ func (x *extractor) symbol(obj types.Object, n ast.Node, doc string) string {
 	signature := types.ObjectString(obj, func(p *types.Package) string {
 		return p.Path()
 	})
+	if declaration, ok := n.(*ast.FuncDecl); ok {
+		copy := *declaration
+		copy.Body = nil
+		copy.Doc = nil
+		signature = x.label(&copy)
+	}
 	x.facts.Symbols = append(x.facts.Symbols, Symbol{
 		ID:            id,
 		Name:          obj.Name(),
@@ -143,6 +150,7 @@ func extract(p *packages.Package) Facts {
 		pkg:     p,
 		ids:     map[types.Object]string{},
 		symbols: map[string]bool{},
+		parents: map[ast.Node]ast.Node{},
 		facts: Facts{
 			ID:        p.PkgPath,
 			Files:     append([]string{}, p.GoFiles...),
@@ -151,6 +159,20 @@ func extract(p *packages.Package) Facts {
 			Edges:     []Relation{},
 			Behaviors: []Behavior{},
 		},
+	}
+	for _, file := range p.Syntax {
+		var stack []ast.Node
+		ast.Inspect(file, func(n ast.Node) bool {
+			if n == nil {
+				stack = stack[:len(stack)-1]
+				return false
+			}
+			if len(stack) > 0 {
+				x.parents[n] = stack[len(stack)-1]
+			}
+			stack = append(stack, n)
+			return true
+		})
 	}
 	for path := range p.Imports {
 		x.facts.Imports = append(x.facts.Imports, path)
@@ -369,31 +391,53 @@ func (x *extractor) edge(owner string, obj types.Object, kind string, n ast.Node
 	if target == "" {
 		return
 	}
+	expression := x.label(n)
+	if ident, ok := n.(*ast.Ident); ok {
+		if selector, ok := x.parents[ident].(*ast.SelectorExpr); ok && selector.Sel == ident {
+			expression = x.label(selector)
+		}
+		if kind == "writes" {
+			for parent := x.parents[n]; parent != nil; parent = x.parents[parent] {
+				if _, ok := parent.(ast.Stmt); ok {
+					expression = x.label(parent)
+					break
+				}
+			}
+		}
+	}
 	evidence := x.span(n)
 	id := fmt.Sprintf("%s:%s:%s:%s:%d:%d", owner, kind, target, evidence.File, evidence.Line, evidence.Column)
 	x.facts.Edges = append(x.facts.Edges, Relation{
-		ID:        id,
-		Source:    owner,
-		Target:    target,
-		Kind:      kind,
-		Label:     kind + " " + obj.Name(),
-		Certainty: certainty,
-		Evidence:  evidence,
+		ID:         id,
+		Source:     owner,
+		Target:     target,
+		Kind:       kind,
+		Label:      kind + " " + obj.Name(),
+		Certainty:  certainty,
+		Evidence:   evidence,
+		Expression: expression,
 	})
 }
 
-func (x *extractor) callee(expr ast.Expr) types.Object {
+// callableSyntax unwraps parentheses and generic instantiation before resolving a call.
+func callableSyntax(expr ast.Expr) ast.Expr {
 	switch e := expr.(type) {
+	case *ast.ParenExpr:
+		return callableSyntax(e.X)
+	case *ast.IndexExpr:
+		return callableSyntax(e.X)
+	case *ast.IndexListExpr:
+		return callableSyntax(e.X)
+	}
+	return expr
+}
+
+func (x *extractor) callee(expr ast.Expr) types.Object {
+	switch e := callableSyntax(expr).(type) {
 	case *ast.Ident:
 		return x.pkg.TypesInfo.Uses[e]
 	case *ast.SelectorExpr:
 		return x.pkg.TypesInfo.Uses[e.Sel]
-	case *ast.IndexExpr:
-		return x.callee(e.X)
-	case *ast.IndexListExpr:
-		return x.callee(e.X)
-	case *ast.ParenExpr:
-		return x.callee(e.X)
 	}
 	return nil
 }
@@ -439,7 +483,7 @@ func (x *extractor) relations(owner string, n ast.Node) {
 				if _, ok := obj.(*types.Var); ok {
 					certainty = "possible"
 				}
-				if sel, ok := s.Fun.(*ast.SelectorExpr); ok {
+				if sel, ok := callableSyntax(s.Fun).(*ast.SelectorExpr); ok {
 					if selection := x.pkg.TypesInfo.Selections[sel]; selection != nil {
 						if _, ok := selection.Recv().Underlying().(*types.Interface); ok {
 							certainty = "possible"
@@ -447,7 +491,7 @@ func (x *extractor) relations(owner string, n ast.Node) {
 					}
 					calls[sel.Sel] = true
 				}
-				if id, ok := s.Fun.(*ast.Ident); ok {
+				if id, ok := callableSyntax(s.Fun).(*ast.Ident); ok {
 					calls[id] = true
 				}
 				x.edge(owner, obj, kind, s, certainty)

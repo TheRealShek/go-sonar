@@ -4,13 +4,15 @@ use std::path::Path;
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::{
-    AnalysisBatch, Behavior, Direction, Error, GraphRequest, GraphSummary, GraphView,
-    ProjectSummary, Relation, Result, Symbol, ViewNode,
+    AnalysisBatch, Behavior, Direction, Error, GraphRequest, GraphView, ProjectSummary, Relation,
+    Result, Symbol,
 };
 
 const MAX_NODES: usize = 300;
 const MAX_EDGES: usize = 1200;
 const PAGE_SIZE: usize = 40;
+
+mod learning;
 const KINDS: &[&str] = &[
     "calls",
     "references",
@@ -251,7 +253,7 @@ impl GraphStore {
         let mut statement = self.connection.prepare(
             "SELECT body FROM symbols WHERE local=1
             AND (name LIKE ?1 ESCAPE '\\' OR qualified_name LIKE ?1 ESCAPE '\\')
-            ORDER BY CASE WHEN name=?2 THEN 0 ELSE 1 END, name, id LIMIT ?3",
+            ORDER BY CASE WHEN name=?2 THEN 0 WHEN ?2='' AND name='main' AND kind='function' THEN 1 WHEN ?2='' AND kind IN ('struct','interface','type') THEN 2 ELSE 3 END, name, id LIMIT ?3",
         )?;
         let rows = statement
             .query_map(params![pattern, query, limit.clamp(1, 100) as i64], |r| {
@@ -299,7 +301,7 @@ impl GraphStore {
             .map_err(Into::into)
     }
 
-    /// Query one adjacency window without hydrating undisclosed symbols.
+    /// Page distinct endpoint/kind connections and preserve their evidence in SQLite.
     fn adjacent(
         &self,
         id: &str,
@@ -307,34 +309,73 @@ impl GraphStore {
         kinds: &[String],
         limit: usize,
         offset: usize,
+        group: Option<&crate::NeighborFilter>,
     ) -> Result<Vec<Relation>> {
         let condition = match direction {
-            Direction::Incoming => "target=?1",
-            Direction::Outgoing => "source=?1",
-            Direction::Both => "(source=?1 OR target=?1)",
+            Direction::Incoming => "r.target=?1",
+            Direction::Outgoing => "r.source=?1",
+            Direction::Both => "(r.source=?1 OR r.target=?1)",
         };
-
-        // Kinds were validated against fixed identifiers, never arbitrary SQL input.
         let filters = kinds
             .iter()
             .map(|k| format!("'{k}'"))
             .collect::<Vec<_>>()
             .join(",");
+        let empty = crate::NeighborFilter::default();
+        let group = group.unwrap_or(&empty);
         let sql = format!(
-            "SELECT body FROM relations WHERE {condition} AND kind IN ({filters})
-            ORDER BY CASE kind WHEN 'calls' THEN 0 WHEN 'writes' THEN 1 WHEN 'reads' THEN 2
-                WHEN 'constructs' THEN 3 WHEN 'uses_type' THEN 4 ELSE 5 END,id LIMIT ?2 OFFSET ?3"
+            "SELECT MIN(r.id), COUNT(*), SUM(CASE WHEN json_extract(r.body,'$.certainty')='possible' THEN 1 ELSE 0 END)
+             FROM relations r JOIN symbols s ON s.id=CASE WHEN r.source=?1 THEN r.target ELSE r.source END
+             WHERE {condition} AND r.kind IN ({filters})
+             AND (?4='' OR s.package_id=?4) AND (?5='' OR r.kind=?5)
+             AND (?6='' OR (?6='incoming' AND r.target=?1) OR (?6='outgoing' AND r.source=?1))
+             GROUP BY r.source,r.target,r.kind
+             ORDER BY MAX(s.local) DESC,
+             CASE r.kind WHEN 'calls' THEN 0 WHEN 'writes' THEN 1 WHEN 'reads' THEN 2
+             WHEN 'constructs' THEN 3 WHEN 'uses_type' THEN 4 ELSE 5 END, s.package_id, MIN(r.id)
+             LIMIT ?2 OFFSET ?3"
         );
-        let mut stmt = self.connection.prepare(&sql)?;
-        let rows = stmt.query_map(params![id, limit as i64, offset as i64], |r| {
-            r.get::<_, String>(0)
-        })?;
-
-        rows.map(|row| {
-            let body = row?;
-            Ok(serde_json::from_str(&body)?)
-        })
-        .collect()
+        let mut statement = self.connection.prepare(&sql)?;
+        let groups = statement
+            .query_map(
+                params![
+                    id,
+                    limit as i64,
+                    offset as i64,
+                    group.package_id,
+                    group.kind,
+                    group.direction
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        read_count_at(row, 1)?,
+                        read_count_at(row, 2)?,
+                    ))
+                },
+            )?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut result = Vec::with_capacity(groups.len());
+        for (edge_id, count, possible) in groups {
+            let body: String = self.connection.query_row(
+                "SELECT body FROM relations WHERE id=?1",
+                [edge_id],
+                |r| r.get(0),
+            )?;
+            let mut relation: Relation = serde_json::from_str(&body)?;
+            let sites =
+                self.relation_sites(&relation.source, &relation.target, &relation.kind, 0)?;
+            relation.site_count = count;
+            relation.sites = sites.sites;
+            if possible > 0 {
+                relation.certainty = "possible".into();
+            }
+            if count > 1 {
+                relation.label = format!("{} · {count} source sites", relation.label);
+            }
+            result.push(relation);
+        }
+        Ok(result)
     }
 
     /// Disclose focus neighbors and only the further levels explicitly requested.
@@ -344,6 +385,19 @@ impl GraphStore {
             || request.focus.len() > 2048
             || request.offsets.len() > 65
             || request.offsets.values().any(|offset| *offset > 1_000_000)
+            || request.groups.len() > 65
+            || request.regions.len() > 64
+            || request.behavior_anchors.len() > 16
+            || request.outcome_offsets.len() > 16
+            || request
+                .outcome_offsets
+                .values()
+                .any(|offset| *offset > 1_000_000)
+            || request.groups.values().any(|g| {
+                g.package_id.len() > 2048
+                    || (!g.kind.is_empty() && !KINDS.contains(&g.kind.as_str()))
+                    || !["", "incoming", "outgoing"].contains(&g.direction.as_str())
+            })
         {
             return Err(Error::Invalid(
                 "expansion request exceeds its bounds".into(),
@@ -363,6 +417,12 @@ impl GraphStore {
             edges: vec![],
             summaries: vec![],
             truncated: false,
+            behaviors: vec![],
+        };
+        let page_size = if request.neighbor_limit == 0 {
+            8
+        } else {
+            request.neighbor_limit.clamp(1, PAGE_SIZE)
         };
         let expanded: HashSet<_> = request.expanded.iter().map(String::as_str).collect();
 
@@ -380,10 +440,28 @@ impl GraphStore {
             }
 
             let offset = request.offsets.get(&id).copied().unwrap_or(0);
-            let adjacent = self.adjacent(&id, request.direction, kinds, PAGE_SIZE + 1, offset)?;
-            pages.insert(id.clone(), (offset, adjacent.len() > PAGE_SIZE));
+            let adjacent = self.adjacent(
+                &id,
+                request.direction,
+                kinds,
+                page_size + 1,
+                offset,
+                request.groups.get(&id),
+            )?;
+            pages.insert(
+                id.clone(),
+                (
+                    offset,
+                    adjacent.len() > page_size,
+                    adjacent
+                        .iter()
+                        .take(page_size)
+                        .map(|e| e.site_count.max(1))
+                        .sum::<usize>(),
+                ),
+            );
 
-            for edge in adjacent.into_iter().take(PAGE_SIZE) {
+            for edge in adjacent.into_iter().take(page_size) {
                 if edge_ids.contains(&edge.id) {
                     continue;
                 }
@@ -447,135 +525,65 @@ impl GraphStore {
             relation.source = node.id.clone();
             relation.label = "call target".into();
             relation.evidence = node.source.clone();
+            relation.expression = node
+                .details
+                .as_ref()
+                .map(|d| d.expression.clone())
+                .unwrap_or_else(|| node.name.clone());
+            relation.site_count = 1;
+            relation.sites = vec![crate::RelationSite {
+                id: relation.id.clone(),
+                expression: relation.expression.clone(),
+                evidence: relation.evidence.clone(),
+                certainty: relation.certainty.clone(),
+            }];
             view.edges.push(relation);
         }
 
         for node in view.nodes.iter().filter(|n| n.parent_id.is_none()) {
-            let incoming = self.degree(&node.id, "target")?;
-            let outgoing = self.degree(&node.id, "source")?;
-            let total: usize = self.connection.query_row(
-                "SELECT COUNT(*) FROM relations
-                WHERE source=?1 OR target=?1",
-                [&node.id],
-                read_count,
-            )?;
-            let visible = view
-                .edges
-                .iter()
-                .filter(|e| e.source == node.id || e.target == node.id)
-                .filter(|e| edge_ids.contains(&e.id))
-                .count();
-
-            view.summaries.push(GraphSummary {
-                node_id: node.id.clone(),
-                incoming,
-                outgoing,
-                hidden: total.saturating_sub(visible),
-                page_offset: pages.get(&node.id).map(|p| p.0),
-                page_size: pages.get(&node.id).map(|_| PAGE_SIZE),
-                has_more: pages.get(&node.id).map(|p| p.1),
-            });
+            view.summaries.push(self.learning_summary(
+                node,
+                request,
+                &view,
+                &edge_ids,
+                pages.get(&node.id).copied(),
+                page_size,
+            )?);
         }
 
         Ok(view)
     }
 
-    fn degree(&self, id: &str, column: &str) -> Result<usize> {
-        self.connection
-            .query_row(
-                &format!("SELECT COUNT(*) FROM relations WHERE {column}=?1"),
-                [id],
-                read_count,
-            )
-            .map_err(Into::into)
-    }
-
+    /// Preserve the surrounding graph while opening bounded, entry-ordered behavior.
     fn add_internals(
         &self,
         request: &GraphRequest,
         limit: usize,
         view: &mut GraphView,
     ) -> Result<()> {
-        let mut opened: HashSet<_> = view
-            .nodes
-            .iter()
-            .filter_map(|n| n.parent_id.clone())
-            .collect();
-
         for id in &request.internals {
-            if !opened.insert(id.clone()) {
+            if view.behaviors.iter().any(|b| b.symbol_id == *id) {
                 continue;
             }
-
             let Some(parent) = view
                 .nodes
                 .iter()
                 .find(|n| n.id == *id && n.parent_id.is_none())
+                .cloned()
             else {
                 continue;
             };
-            let package_id = parent.package_id.clone();
-
             let body: Option<String> = self
                 .connection
                 .query_row("SELECT body FROM behaviors WHERE symbol_id=?1", [id], |r| {
                     r.get(0)
                 })
                 .optional()?;
-            let Some(body) = body else {
-                continue;
-            };
-
-            let behavior: Behavior = serde_json::from_str(&body)?;
-            let mut added = std::collections::HashMap::new();
-
-            for node in behavior.nodes {
-                if view.nodes.len() == limit {
-                    view.truncated = true;
-                    break;
-                }
-
-                added.insert(node.id.clone(), node.source.clone());
-                view.nodes.push(ViewNode {
-                    id: node.id,
-                    name: node.label.clone(),
-                    qualified_name: node.label,
-                    kind: node.kind,
-                    package_id: package_id.clone(),
-                    source: node.source,
-                    signature: String::new(),
-                    documentation:
-                        "Static source structure. This does not prove runtime path feasibility."
-                            .into(),
-                    parent_id: Some(id.clone()),
-                    related_symbol_id: node.related_symbol_id,
-                });
-            }
-
-            for edge in behavior.edges {
-                if !added.contains_key(&edge.target) {
-                    continue;
-                }
-                let Some(evidence) = added.get(&edge.source) else {
-                    continue;
-                };
-                if view.edges.len() == MAX_EDGES {
-                    view.truncated = true;
-                    break;
-                }
-
-                view.edges.push(Relation {
-                    id: edge.id,
-                    source: edge.source,
-                    target: edge.target,
-                    kind: edge.kind,
-                    label: edge.label,
-                    certainty: "resolved".into(),
-                    evidence: evidence.clone(),
-                });
-            }
+            let behavior = body
+                .map(|body| serde_json::from_str::<Behavior>(&body))
+                .transpose()?;
+            self.project_behavior(&parent, behavior.as_ref(), request, limit, view)?;
         }
-
         Ok(())
     }
 
@@ -602,6 +610,8 @@ impl GraphStore {
             limit,
             direction: Direction::Incoming,
             offsets: Default::default(),
+            neighbor_limit: 40,
+            ..Default::default()
         })?;
 
         for edge in &mut view.edges {
@@ -617,7 +627,11 @@ impl GraphStore {
 }
 
 fn read_count(row: &rusqlite::Row<'_>) -> rusqlite::Result<usize> {
-    usize::try_from(row.get::<_, i64>(0)?).map_err(|error| {
+    read_count_at(row, 0)
+}
+
+fn read_count_at(row: &rusqlite::Row<'_>, column: usize) -> rusqlite::Result<usize> {
+    usize::try_from(row.get::<_, i64>(column)?).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(
             0,
             rusqlite::types::Type::Integer,

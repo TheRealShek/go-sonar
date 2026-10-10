@@ -1,109 +1,57 @@
-# Design discussion
+# Design decisions
 
-## Status
+This record explains the confirmed product choices. A working implementation now exists; these decisions remain the basis for development. Read [implementation notes](implementation-notes.md) for current scope rather than treating a design goal as a completed feature.
 
-The user confirmed Q1, Q2, and Q3, added progressive disclosure, and approved the architecture with explicit performance requirements. The shared product direction and architecture are settled for the current documentation scope. No major question remains that requires another interview round.
+## Graph as the main interface
 
-This task covers documentation and design discussion. No application implementation is authorized.
+Users start at any symbol and expand incoming or outgoing relationships. A small initial neighborhood and explicit reveal actions keep large codebases readable. Connections need meanings, source evidence, and explanations of hidden detail.
 
-## Confirmed decisions
+This supports libraries as well as executables. It avoids requiring every investigation to begin at `main` or display a complete repository graph.
 
-- The primary interface is an interactive graph for understanding real code.
-- Exploration starts at any symbol and continues in either direction across multiple levels.
-- Progressive disclosure is required: initially show only the most relevant relationships, and let users choose which connections to expand.
-- Connections need visible meanings and accessible source evidence.
-- Function internals include conditions, returns, and data transformations.
-- Function internals expand as collapsible subgraphs, visually grouped inside the selected function.
-- Explanations are contextual, offline, and use no AI.
-- The initial product uses static source analysis without running project code.
-- Initial impact exploration starts with a selected symbol and a hypothetical change category.
-- Go is the initial target language.
-- Programming tutorials and teaching exercises are outside the current focus.
-- Use Tauri + React Flow + a Rust application core + a Go analyzer.
-- Use ELK.js initially through a replaceable layout boundary.
-- Incremental analysis must reuse valid facts after edits and update affected consumers correctly.
-- Only the visible graph is sent to the renderer, with expansion on demand.
-- Benchmarks must cover indexing, expansion latency, and memory across Rust, Go, and WebView processes.
+## Function internals stay grouped
 
-Rust owns application graph processing and cache management. Go supplies language-specific source analysis. The choice does not imply that all expensive work runs in Rust or that performance is guaranteed by the implementation language.
+Expand behavior inside a collapsible function subgraph. Conditions, operations, transformations, and returns stay together while preserving connections to surrounding declarations.
 
-## Design tree
+Grouping retains context when crossing between a function's internals and external relationships. The cost is more complex layout and routing across group boundaries. Focus controls and region expansion provide room without requiring a separate exploration model.
 
-The root is understanding a codebase through a graph. The following branches show the settled product choices and the implementation planning that depends on them.
+## Static analysis first
 
-1. Graph as the primary interface, confirmed.
-   - Symbols and meaningful relationships, confirmed intent.
-   - Expansion through multiple levels, confirmed intent.
-     - Progressive disclosure keeps the initial neighborhood small and further expansion explicit.
-     - Grouping, relevance selection, and display limits must keep additional connections discoverable.
-   - Internal behavior is explorable, confirmed intent.
-     - Q1 resolved: visually grouped, collapsible function subgraphs.
-     - Detailed layout, routing, and navigation follow this decision.
-2. Offline, evidence-grounded explanations without AI, confirmed.
-   - Source evidence and documented purpose, confirmed intent.
-   - Q2 resolved: static source analysis for the initial product.
-     - Runtime tracing is outside the initial scope and may be considered later.
-3. Potential change impact, confirmed intent.
-   - Every impact needs a reason and a relationship path, confirmed intent.
-   - Q3 resolved: selected symbol and hypothetical change category.
-     - Category-specific impact rules follow this decision.
-     - Actual Git diff analysis is outside the initial scope and may be considered later.
-4. Go codebases first, confirmed.
-   - Go analysis supplies source facts and evidence.
-   - Detailed relationship and behavior coverage follows the product requirements above.
-5. Desktop architecture, approved.
-   - Tauri provides the desktop shell; React Flow presents the bounded exploration.
-   - Rust manages the index, graph processing, caches, and analyzer lifecycle.
-   - ELK.js starts behind a replaceable layout boundary.
-   - Source facts, exploration state, and layout geometry remain separate.
-6. Performance requirements, approved.
-   - Edits trigger dependency-aware incremental updates, not routine full repository reindexing.
-   - Renderer input stays bounded to the visible graph.
-   - Benchmarks measure complete indexing and expansion workloads and total process-tree memory.
-   - Numerical budgets follow initial measurement and must be set before release acceptance.
+Analyze source without running the inspected application. Runtime tracing is outside the initial scope because it adds execution setup and a second kind of evidence before the source explorer is validated.
 
-## Resolved question round
+Static analysis can describe source-defined paths and relationships. It cannot establish observed execution, concrete values, or the feasibility of every branch combination. The UI must preserve that distinction.
 
-The user accepted the recommendations and clarified the reasons below. Alternatives are retained only to explain the trade-offs.
+Offline operation and avoiding project execution are separate requirements. Package loading may invoke compiler tools even though the app does not run the project's application, tests, or generators.
 
-### Q1. Collapsible function subgraphs
+## Source-based explanations without AI
 
-Decision: expand internal behavior as a collapsible function subgraph inside the existing exploration graph. Conditions, branches, transformations, and returns stay visually grouped inside the selected function.
+Use declarations, documentation, types, expressions, and control facts for contextual explanations. Link claims to inspectable source and leave undocumented design intent unknown.
 
-Reason: grouping keeps the main graph readable while preserving connections between internal operations and surrounding symbols. An explicit focus action can provide more room without discarding the exploration.
+This keeps explanations available offline and tied to evidence. It also limits the app to what its analysis and supplied documentation establish.
 
-Trade-off: the layout needs to handle nested detail and connections crossing a function boundary. A dedicated behavior view would provide more space but would make crossing between internal and external relationships less immediate.
+## Hypothetical changes first
 
-### Q2. Static source analysis initially
+Start impact exploration with a selected symbol and a signature, field, or behavior change category. Users can inspect relevant consumers before editing source or selecting a previous version.
 
-Decision: analyze source without running project code in the initial product. Runtime tracing is outside the initial scope.
+The trade-off is that a category describes potential effects rather than the consequences of an exact patch. Git diff comparison would require a baseline and entity matching across revisions. It remains outside the current scope. Current impact queries cover direct incoming candidates, not complete transitive effects.
 
-Reason: runtime tracing adds significant complexity and is unnecessary to prove that the core visual explorer is useful.
+## Desktop and analysis boundaries
 
-Trade-off: the graph can show source-defined paths and possible relationships but cannot claim that a scenario executed them. Opt-in execution would add observations at the cost of setup requirements, execution controls, and a second kind of evidence.
+Use Tauri and React Flow for presentation, Rust for index ownership and graph queries, and Go for language-specific analysis. Keep ELK.js replaceable through an independent layout contract.
 
-Runtime tracing may be considered later. Offline operation and avoiding project execution are separate constraints, and the initial product satisfies both.
+These choices reuse existing desktop, graph, and Go language tooling. They introduce transport and process boundaries that need failure handling and whole-application measurement. Rust does not eliminate Go loading costs or WebView memory.
 
-### Q3. Hypothetical change categories initially
+The durable decision is [ADR 0001](adr/0001-desktop-and-analysis-boundaries.md). [Architecture](architecture.md) explains the current responsibilities.
 
-Decision: start an impact investigation with a selected symbol and a hypothetical change category, such as signature, field, or behavior.
+## Incremental updates and bounded views
 
-Reason: the user can investigate relevant consumers and relationship paths before making edits or supplying a previous code state.
+Refresh affected analysis and reuse valid facts. Body edits, declaration changes, and source-location changes can have different invalidation scopes. Correctness determines which consumers need replacement.
 
-Trade-off: results describe potential effects of a category rather than an exact patch. Actual-edit comparison would connect impact to concrete work but requires a comparison baseline and rules for matching entities across versions.
+Keep the full index in Rust and send only bounded display projections to the frontend. Pagination, connection groups, and region summaries explain omitted detail without loading hidden repository graphs into React Flow.
 
-Actual Git diff analysis may be considered later and is outside the initial scope.
+Benchmarks must include indexing, request-to-render expansion, and simultaneous process-tree memory. Initial smoke runs exist; numerical release budgets and production workload checks remain pending.
 
-## Deferred decisions
+## Decisions still open
 
-- Detailed subgraph layout, routing, and navigation can be resolved during implementation planning.
-- Relevance selection, neighborhood limits, and group expansion follow the confirmed progressive-disclosure requirement. The requirement itself is settled.
-- Category-specific impact rules can be defined against the confirmed hypothetical-change experience.
-- Exact library versions, storage choices, packaging details, and incremental invalidation rules can be resolved against the approved architecture.
-- Benchmark fixtures and numerical performance budgets must be defined and recorded before release acceptance. No measurements have been made yet.
-- Detailed first-release analysis coverage remains implementation planning work. Internal behavior is a core requirement, not an optional runtime feature.
-- Runtime tracing and Git comparison require separate future scope decisions if pursued.
+Further work needs to establish release performance budgets, representative production workloads, and usability results. Layout tuning, relevance ranking, broader analysis coverage, and build-configuration controls need verification against those workloads.
 
-## Decision record policy
-
-The approved desktop and analysis boundaries are recorded in [ADR 0001](adr/0001-desktop-and-analysis-boundaries.md). Routine tuning and reversible library choices remain in the architecture and performance documents rather than generating additional ADRs.
+Routine tuning and reversible library choices belong in the architecture, implementation, and performance documents. Add a new decision record when a durable boundary or product choice changes.

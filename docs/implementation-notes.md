@@ -1,45 +1,63 @@
-# Initial working slice
+# Analysis scope and implementation notes
 
-The current application turns a local Go module into an explorable graph. It is the first implementation of the approved intent, with an explicit analysis scope and limits. The product acceptance scenarios remain the target; this milestone does not claim complete Go semantics or release readiness.
+The current app opens a local Go module and turns source-backed declarations, relationships, and static function behavior into a bounded graph. It is an early implementation of the [product intent](product-intent.md), not complete Go semantic analysis or a release readiness claim.
 
-## Data and publication
+For the controls and a worked example, use the [user guide](user-guide.md).
 
-The Go helper uses `go/packages`, ASTs, and type information to extract declarations, source-backed relationships, and internal control structure. It never runs the project's application, tests, or generators. It disables network module downloads, toolchain downloads, and custom package drivers. The installed Go toolchain may invoke compilation tools, including cgo tools, while loading packages. Dependencies must already exist locally. The current helper requires Go 1.26 or newer.
+## Supported scope
 
-The helper stays alive while the application runs. It retains source and declaration fingerprints. Rust receives package replacements, owns the SQLite graph, and commits updates atomically. Declaration changes invalidate reverse consumers; body edits usually replace just their package. A source-location change can also require updating consumers so evidence does not point to old lines. A new analyzer session or build scope sends a full snapshot that clears stale disk-cache packages. External local dependency edits outside the selected module require an application restart; this scope is also shown in analyzer diagnostics. Warm startup still performs initial source analysis; the disk cache is not a serialized Go compiler state.
+Analysis covers active non-test packages under a selected directory containing `go.mod`. The Go helper uses `go/packages`, syntax trees, and type information. It requires Go 1.26 or newer.
 
-Queries continue to use the previously published snapshot during analysis. Publication holds the Rust index lock while committing the replacement, so one graph response cannot straddle a source update. Analysis requests are serialized and duplicate concurrent requests return a busy error. A failed transport or persistence operation discards the helper session, ensuring retries resend facts that were not committed.
+The app does not run project applications, tests, or generators. It disables module downloads, toolchain downloads, and custom package drivers. Go package loading may invoke compilation tools, including cgo tools. Required dependencies must already exist locally.
 
-## Visible graph
+Relationships include calls, references, reads, writes, construction, interface satisfaction, and type uses where the analyzer can establish them. A resolved relationship describes source facts. It does not prove that the relationship executes for every input.
 
-Focus expands one neighborhood. Only explicitly expanded nodes reveal another level. Incoming/outgoing direction and relationship kinds are applied before Rust hydrates neighboring symbols. Cycles and shared dependencies retain one identity. Counts report undisclosed source relationships without fetching their nodes.
+## Function behavior
 
-The UI requests 80 nodes. Rust clamps requests to 300 nodes, 1,200 edges, 64 expansion seeds, and 16 opened function groups. Empty relationship filters reveal no external edges. Function internals consume the same node budget; opening focus behavior reserves its space before external fan-out. Truncation is visible. Neighbor pages expose up to 40 relation sites per expanded seed with Previous/Next controls. These are edge pages, not counts of distinct symbols. Refocusing or collapsing other groups frees room when the overall node limit is reached. Very large functions may show only a bounded part of their internal graph.
+Function groups contain entry points, conditions, loops, calls, operations, returns, and control connections. Regions summarize hidden detail and provide explicit reveal actions. Flow navigation follows a bounded static path; return selection highlights possible control routes.
 
-Function groups include conditions, loops, operations, calls, returns, and source control connections. Call nodes link to visible targets and retain a target identity for refocusing. Assignment labels expose transformations as source expressions. Detailed value-dependence, aliases, and SSA are not implemented. Unsupported select/type-switch/goto/label control flow stops at a marked operation. Deferred and concurrent execution is described as registration/start operations rather than a fabricated sequential execution trace.
+Direct-call navigation retains the exact caller occurrence. Interface and dynamic calls remain unresolved implementation boundaries. Call facts can map argument expressions to parameters and returned positions to destinations. Operation facts can identify field accesses, mutations, and local binding occurrences.
 
-Desktop builds fingerprint the built frontend explicitly so compiler caches cannot reuse an executable containing older assets.
+These mappings do not establish SSA-based value dependence, complete alias tracking, or how a passed argument influences a returned result. Local binding occurrences are not a complete reaching-definition analysis.
 
-The graph model contains no ELK or React Flow objects. The ELK adapter uses its API on the UI side and an explicitly bundled dedicated worker for layout computation. Worker replacement bounds obsolete layout work. A nested bundled ELK worker failed under native WebKit, so the desktop benchmark now exercises the production worker boundary rather than relying on browser-only tests.
+Unsupported select, type-switch, goto, and labelled control flow stops at a marked operation. Deferred and concurrent work appears as registration or start operations, not a fabricated sequential execution trace. Closure-body exploration and concrete dynamic target enumeration remain incomplete.
 
-## Explanation and impact
+## Indexing and refresh
 
-Documentation, signatures, typed edge labels, branch labels, and source positions supply context. Missing author intent is reported as unknown. There is no model, AI endpoint, or generated explanation service.
+Refresh is manual. The persistent helper retains source and declaration fingerprints; Rust owns the SQLite graph. A body edit usually replaces its package. Declaration changes invalidate reverse consumers. Source-location changes can also update consumers so evidence points to current lines.
 
-Potential impact filters direct incoming source uses for signature, field, or behavior changes. It changes the framing of existing evidence to possible effects; it does not prove callers break or enumerate all transitive effects. Users can refocus a candidate to continue normal graph exploration. Runtime tracing and Git diff analysis remain outside this milestone.
+A new helper session or build scope sends a full snapshot that clears obsolete disk-cache packages. Warm startup still analyzes source; the disk index is not serialized Go compiler state. Edits to local dependencies outside the selected module require restarting the app.
 
-The analyzer verifies that the source/configuration set has not changed before publication and requests a retry if it has. The source inspector verifies the published file fingerprint before using its coordinates, canonicalizes paths and limits reads to the active module. It caps excerpts at 160 lines and 256 KiB and rejects files larger than 8 MiB. External declarations can be visible with unavailable source; they cannot grant arbitrary file access. Opening the source in an external editor is not implemented.
+Queries use the previous published snapshot while analysis runs. Rust commits updates atomically under the index lock. Analysis requests are serialized; duplicate concurrent analysis requests return a busy error. A transport or persistence failure discards the helper session so the next request resends uncommitted facts.
 
-## Current scope
+The analyzer checks that source and configuration inputs remain consistent before publication. Syntax or type errors remove stale affected facts and expose incomplete coverage. Fixing the source and refreshing can restore those facts.
 
-Open an individual directory containing `go.mod`. Workspace-root selection, test-package analysis, configurable build tags, file watching, detailed dynamic target enumeration, and closure-body exploration remain future work. Refresh is manual. Type or syntax errors remove stale affected facts and expose an incomplete snapshot. Coverage warnings appear even for a valid graph.
+## Graph bounds and grouping
 
-Inactive workspaces can suspend WebKit animation frames. The explicit background benchmark measures layout and React DOM commit, and reports that it does not include frame presentation. Foreground mode still awaits actual frames. No timed callback substitutes for a rendered frame.
+The UI requests 80 nodes. Rust caps a view at 300 nodes and 1,200 edges, with at most 64 expansion seeds and 16 open function groups. Function internals share the node budget with external neighbors; focus internals receive space before external fan-out.
 
-Benchmarks use optimized binaries and distinguish query/serialization timing from rendered timing. The Linux sampler records simultaneous PSS for all observed descendants, including the Go toolchain and WebKit. It reports unavailable process measurements instead of treating them as zero. A 25 ms interval can miss short peaks. Initial indexing retains existing Go and OS caches; it is not a filesystem-cold measurement. Numerical budgets and production-repository workloads remain to be established.
+Initial UI requests use eight neighbor connections. The backend permits pages of up to 40 grouped endpoint/kind connections. Repeated source occurrences share a displayed connection and remain inspectable through source-site pages. These page counts differ from both individual source sites and distinct symbols.
 
-## Validation
+Package and relationship summaries distinguish filtered, collapsed, paginated, and limited connections. Empty relationship filters show no external edges. Explicit expansions, shared identities, and bounded internal regions keep cycles and large functions finite. Refocusing or collapsing detail can free room when the view is limited.
 
-Go tests cover incremental body and declaration edits, consumer source positions, package deletion, syntax failure/recovery, a clean-analysis oracle, type-resolved relationships, interface identities, internal paths, offline transport, EOF, and request limits. Rust tests cover transactional replacements, shared external ownership, full-snapshot cleanup, rollback, bounds, filters, duplicate internal requests, source containment, the real helper, and persistence-failure recovery. Frontend tests cover bounded view validation, request supersession, benchmark publication, and the production ELK API/worker protocol.
+## Evidence and impact
 
-Run the commands in [README](../README.md) to reproduce checks and measurements. The performance requirements in [performance.md](performance.md) remain the release criteria.
+Explanations use source facts, signatures, declaration documentation, and operation details. Missing author intent remains unknown. There is no AI model or explanation endpoint.
+
+The source inspector canonicalizes paths, confines reads to the module, and verifies the published file fingerprint. Excerpts are capped at 160 lines and 256 KiB; files larger than 8 MiB are rejected. External declarations can have useful metadata without readable declaration source. Inspect local call sites instead. External editor navigation is not implemented.
+
+Potential-impact queries filter direct incoming uses by signature, field, or behavior category. They identify candidates for inspection, not proven breakage or all transitive effects. Runtime tracing and Git diff comparison remain outside the current scope.
+
+## Layout and measurement
+
+The graph model contains no ELK or React Flow objects. A bundled dedicated worker computes ELK layout through a separate contract. Worker replacement bounds obsolete work. Desktop builds fingerprint frontend assets so compiler caches cannot reuse an executable containing older assets.
+
+Native WebKit can suspend animation frames on an inactive workspace. Background benchmark mode measures layout and DOM commit and excludes frame presentation. Foreground mode waits for frames; a timer does not substitute for a rendered frame.
+
+The Linux benchmark sampler measures simultaneous process-tree PSS, including Go tooling and WebKit. Its 25 ms interval can miss short peaks. Initial indexing retains existing Go and OS caches. Production workloads and numerical release budgets remain to be established.
+
+## Remaining work
+
+Automatic file watching, workspace-root loading, test-package analysis, configurable build tags, external editor navigation, deeper value and alias analysis, and complete dynamic or concurrent execution coverage remain unfinished.
+
+The [validation record](validation.md) describes checks on an earlier slice. The [development guide](development.md) lists commands to verify the current revision; historical results do not validate subsequent changes.

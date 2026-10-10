@@ -25,13 +25,14 @@ type Symbol struct {
 
 // Relation records a source-backed relationship between symbols.
 type Relation struct {
-	ID        string `json:"id"`
-	Source    string `json:"source"`
-	Target    string `json:"target"`
-	Kind      string `json:"kind"`
-	Label     string `json:"label"`
-	Certainty string `json:"certainty"`
-	Evidence  Span   `json:"evidence"`
+	ID         string `json:"id"`
+	Source     string `json:"source"`
+	Target     string `json:"target"`
+	Kind       string `json:"kind"`
+	Label      string `json:"label"`
+	Certainty  string `json:"certainty"`
+	Evidence   Span   `json:"evidence"`
+	Expression string `json:"expression"`
 }
 
 // Node describes one static operation or decision inside a function.
@@ -41,7 +42,8 @@ type Node struct {
 	Label  string `json:"label"`
 	Source Span   `json:"source"`
 
-	RelatedSymbolID string `json:"relatedSymbolId,omitempty"`
+	RelatedSymbolID string         `json:"relatedSymbolId,omitempty"`
+	Details         OperationFacts `json:"details"`
 }
 
 // Control connects behavior nodes through static control or data flow.
@@ -98,4 +100,52 @@ type Batch struct {
 
 	Stats       Stats        `json:"stats"`
 	Diagnostics []Diagnostic `json:"diagnostics"`
+}
+
+// OperationFacts explains source syntax without claiming value dependence.
+type OperationFacts struct {
+	Role        string        `json:"role"`
+	Expression  string        `json:"expression"`
+	Explanation string        `json:"explanation"`
+	Limitation  string        `json:"limitation,omitempty"`
+	Call        *CallBoundary `json:"call,omitempty"`
+	Accesses    []Access      `json:"accesses,omitempty"`
+}
+
+// CallBoundary maps caller expressions to the type-resolved call signature.
+type CallBoundary struct {
+	Signature string       `json:"signature"`
+	Receiver  string       `json:"receiver,omitempty"`
+	Dispatch  string       `json:"dispatch"`
+	Arguments []Argument   `json:"arguments"`
+	Results   []CallResult `json:"results"`
+	Variadic  bool         `json:"variadic"`
+}
+
+// Argument identifies a supplied parameter position, including variadic elements.
+type Argument struct {
+	Position   int    `json:"position"`
+	Parameter  string `json:"parameter"`
+	Type       string `json:"type"`
+	Expression string `json:"expression"`
+	Spread     bool   `json:"spread"`
+	Variadic   bool   `json:"variadic"`
+}
+
+// CallResult identifies the destination of one returned position.
+type CallResult struct {
+	Position    int    `json:"position"`
+	Type        string `json:"type"`
+	Destination string `json:"destination"`
+}
+
+// Access is a source read, write, or definition with a shadow-safe object identity.
+type Access struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Kind       string `json:"kind"`
+	Expression string `json:"expression"`
+	Source     Span   `json:"source"`
+	SymbolID   string `json:"symbolId,omitempty"`
+	Mutation   string `json:"mutation,omitempty"`
 }

@@ -8,6 +8,7 @@ export interface LayoutNode {
   width: number;
   height: number;
   parentId?: string;
+  role?: string;
   position?: Point;
 }
 
@@ -15,6 +16,9 @@ export interface LayoutEdge {
   id: string;
   source: string;
   target: string;
+  kind?: string;
+  label?: string;
+  loopBack?: boolean;
 }
 
 export interface LayoutRequest {

@@ -6,6 +6,9 @@ import type {
   SourceExcerpt,
   SourceSpan,
   SymbolFact,
+  RelationSites,
+  Discovery,
+  SymbolPage,
 } from './shared/protocol';
 import { sampleBackend } from './sample';
 import { QueryQueue } from './requests';
@@ -17,6 +20,14 @@ export interface Backend {
   open(root: string): Promise<ProjectSummary>;
   refresh(): Promise<ProjectSummary>;
   search(query: string): Promise<SymbolFact[]>;
+  browse(kind: string, packageId: string, offset: number): Promise<SymbolPage>;
+  discovery(): Promise<Discovery>;
+  relationSites(
+    source: string,
+    target: string,
+    kind: string,
+    offset: number,
+  ): Promise<RelationSites>;
   graph(request: GraphRequest): Promise<GraphView>;
   source(source: SourceSpan): Promise<SourceExcerpt>;
   impact(symbolId: string, category: string): Promise<GraphView>;
@@ -27,6 +38,11 @@ const transport: Backend = isDesktop
       open: (root) => invoke('open_project', { root }),
       refresh: () => invoke('refresh_project'),
       search: (query) => invoke('search_symbols', { query, limit: 40 }),
+      browse: (kind, packageId, offset) =>
+        invoke('browse_symbols', { kind, package: packageId, offset }),
+      discovery: () => invoke('discover_project'),
+      relationSites: (source, target, kind, offset) =>
+        invoke('relation_sites', { source, target, kind, offset }),
       graph: (request) => invoke('graph_view', { request }),
       source: (source) => invoke('source_excerpt', { source }),
       impact: (symbolId, category) => invoke('impact_view', { symbolId, category, limit: 80 }),
@@ -50,3 +66,5 @@ export const benchmarkReport = (report: BenchmarkReport): Promise<void> =>
   isDesktop
     ? invoke('benchmark_report', { report })
     : Promise.reject(new Error('Native benchmark requires desktop mode'));
+
+export const chooseProjectFolder = (): Promise<string | null> => invoke('choose_project_folder');

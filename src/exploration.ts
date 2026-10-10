@@ -12,8 +12,28 @@ export const RELATIONS = [
 
 export const VIEW_LIMIT = 80;
 
-export function requestFor(focus: string): GraphRequest {
-  return { focus, expanded: [], internals: [], kinds: [...RELATIONS], limit: VIEW_LIMIT };
+export function requestFor(
+  focus: string,
+  kind = 'function',
+  preferences?: Pick<GraphRequest, 'kinds' | 'direction' | 'neighborLimit'>,
+): GraphRequest {
+  const kinds =
+    kind === 'field'
+      ? ['reads', 'writes']
+      : ['struct', 'type', 'interface'].includes(kind)
+        ? ['constructs', 'uses_type', 'implements', 'references']
+        : ['calls'];
+  return {
+    focus,
+    expanded: [],
+    internals: [],
+    kinds,
+    limit: VIEW_LIMIT,
+    direction:
+      kind === 'field' || ['struct', 'type', 'interface'].includes(kind) ? 'incoming' : 'outgoing',
+    neighborLimit: 8,
+    ...preferences,
+  };
 }
 
 export function toggleId(ids: string[], id: string): string[] {
@@ -50,7 +70,7 @@ export function validateView(view: GraphView, limit: number): GraphView {
   return view;
 }
 
-// Pagination counts source relation sites (edges), rather than distinct symbols.
+// Pagination counts distinct endpoint/kind connections. Every source occurrence remains inspectable.
 export function neighborPage(
   request: GraphRequest,
   nodeId: string,

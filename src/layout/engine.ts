@@ -13,7 +13,11 @@ export async function calculateLayout(
         width: node.width,
         height: node.height,
         children: [],
-        layoutOptions: { 'elk.padding': '[top=65,left=25,bottom=25,right=25]' },
+        layoutOptions: {
+          'elk.padding': '[top=110,left=30,bottom=30,right=30]',
+          'elk.direction': 'DOWN',
+          'elk.layered.spacing.nodeNodeBetweenLayers': '65',
+        },
       },
     ]),
   );
@@ -41,6 +45,13 @@ export async function calculateLayout(
       id: edge.id,
       sources: [edge.source],
       targets: [edge.target],
+      layoutOptions: {
+        'elk.layered.priority.direction': edge.loopBack
+          ? '0'
+          : edge.kind === 'control'
+            ? '10'
+            : '1',
+      },
     })),
   });
   const positions: LayoutResult['positions'] = {};
