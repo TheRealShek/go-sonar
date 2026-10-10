@@ -187,3 +187,125 @@ func TestOperationEvidence(t *testing.T) {
 		t.Fatalf("mutation=%v deferred=%v unsupported=%v", mutation, deferred, unsupported)
 	}
 }
+
+// TestRangeBindings records iteration bindings at the header without merging body effects.
+func TestRangeBindings(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "go.mod", "module example.test/ranges\n\ngo 1.26.0\n")
+	write(t, root, "main.go", `package ranges
+ type State struct { Value int }
+ func Sum(values []int) int {
+  total := 0
+  for _, value := range values { total += value }
+  return total
+ }
+ func Assign(values []int, state *State) {
+  var index, value int
+  for index, value = range values { println(index, value) }
+  for _, state.Value = range values { println(state.Value) }
+ }
+ func Pointer(values []int, dst *int) { for _, *dst = range values {}; for _, (*dst) = range values {} }
+ func Keys(values []int) { for index := range values { println(index) } }
+ func Shadow(values []int, value int) int {
+  for _, value := range values { println(value) }
+  return value
+ }
+`)
+	b := analyze(t, &testEngine{}, root)
+	var rangeFieldWrite bool
+	for _, pkg := range b.Packages {
+		for _, edge := range pkg.Edges {
+			if edge.Kind == "writes" && strings.Contains(edge.Expression, "range values") && strings.HasSuffix(edge.Target, ".Value") {
+				rangeFieldWrite = true
+			}
+		}
+		for _, diagnostic := range b.Diagnostics {
+			if diagnostic.Severity == "error" {
+				t.Fatal(diagnostic)
+			}
+		}
+		for _, behavior := range pkg.Behaviors {
+			var header []Access
+			for _, node := range behavior.Nodes {
+				if node.Kind != "loop" {
+					continue
+				}
+				if strings.HasSuffix(behavior.SymbolID, "::Pointer") && (!strings.Contains(node.Details.Limitation, "pointer") || !strings.Contains(node.Details.Limitation, "iteration")) {
+					t.Fatal("range pointer mutation boundary missing", node.Details)
+				}
+				header = append(header, node.Details.Accesses...)
+				for _, access := range node.Details.Accesses {
+					if access.Name == "total" {
+						t.Fatal("body accesses mixed into header", access)
+					}
+				}
+			}
+			if strings.HasSuffix(behavior.SymbolID, "::Sum") {
+				var definition *Access
+				for i := range header {
+					if header[i].Name == "value" && header[i].Kind == "define" {
+						definition = &header[i]
+					}
+				}
+				if definition == nil {
+					t.Fatal("range value definition missing", header)
+				}
+				for _, node := range behavior.Nodes {
+					for _, access := range node.Details.Accesses {
+						if access.Name == "value" && access.Kind == "read" && access.ID != definition.ID {
+							t.Fatal("body binding identity differs", access, *definition)
+						}
+					}
+				}
+			}
+			if strings.HasSuffix(behavior.SymbolID, "::Keys") {
+				var keyDefined bool
+				for _, access := range header {
+					keyDefined = keyDefined || access.Name == "index" && access.Kind == "define"
+				}
+				if !keyDefined {
+					t.Fatal("range key definition missing", header)
+				}
+			}
+			if strings.HasSuffix(behavior.SymbolID, "::Assign") {
+				writes := map[string]bool{}
+				for _, access := range header {
+					if access.Kind == "write" {
+						writes[access.Name] = true
+						if !strings.Contains(access.Mutation, "iteration") {
+							t.Fatal("missing repeated-write explanation", access)
+						}
+					}
+				}
+				for _, name := range []string{"index", "value", "Value"} {
+					if !writes[name] {
+						t.Fatal("range assignment missing", name, header)
+					}
+				}
+			}
+			if strings.HasSuffix(behavior.SymbolID, "::Shadow") {
+				var definition string
+				for _, access := range header {
+					if access.Name == "value" && access.Kind == "define" {
+						definition = access.ID
+					}
+				}
+				if definition == "" {
+					t.Fatal("shadow range definition missing", header)
+				}
+				for _, node := range behavior.Nodes {
+					if node.Kind == "return" {
+						for _, access := range node.Details.Accesses {
+							if access.Name == "value" && access.ID == definition {
+								t.Fatal("shadowed range variable reused outside loop", access)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	if !rangeFieldWrite {
+		t.Fatal("range field write missing from relationship graph")
+	}
+}

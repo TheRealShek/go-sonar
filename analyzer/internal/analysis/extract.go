@@ -446,33 +446,34 @@ func (x *extractor) relations(owner string, n ast.Node) {
 	writes := map[*ast.Ident]bool{}
 	reads := map[*ast.Ident]bool{}
 	calls := map[*ast.Ident]bool{}
+	markWrite := func(lhs ast.Expr, readBefore bool) {
+		if index, ok := lhs.(*ast.IndexExpr); ok {
+			lhs = index.X
+		}
+		switch lhs := lhs.(type) {
+		case *ast.Ident:
+			writes[lhs] = true
+		case *ast.SelectorExpr:
+			writes[lhs.Sel] = true
+			if readBefore {
+				reads[lhs.Sel] = true
+			}
+		}
+	}
 	ast.Inspect(n, func(node ast.Node) bool {
 		switch s := node.(type) {
 		case *ast.FuncLit:
 			return false
 		case *ast.AssignStmt:
 			for _, lhs := range s.Lhs {
-				if index, ok := lhs.(*ast.IndexExpr); ok {
-					lhs = index.X
-				}
-				if selector, ok := lhs.(*ast.SelectorExpr); ok && s.Tok != token.ASSIGN && s.Tok != token.DEFINE {
-					reads[selector.Sel] = true
-				}
-				switch lhs := lhs.(type) {
-				case *ast.Ident:
-					writes[lhs] = true
-				case *ast.SelectorExpr:
-					writes[lhs.Sel] = true
-				}
+				markWrite(lhs, s.Tok != token.ASSIGN && s.Tok != token.DEFINE)
+			}
+		case *ast.RangeStmt:
+			for _, lhs := range []ast.Expr{s.Key, s.Value} {
+				markWrite(lhs, false)
 			}
 		case *ast.IncDecStmt:
-			switch lhs := s.X.(type) {
-			case *ast.Ident:
-				writes[lhs] = true
-			case *ast.SelectorExpr:
-				writes[lhs.Sel] = true
-				reads[lhs.Sel] = true
-			}
+			markWrite(s.X, true)
 		case *ast.CallExpr:
 			obj := x.callee(s.Fun)
 			if obj != nil {

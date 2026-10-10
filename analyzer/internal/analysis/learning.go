@@ -102,6 +102,14 @@ func (x *extractor) operation(kind string, n ast.Node) OperationFacts {
 	if evidence != nil {
 		d.Accesses = x.accesses(evidence)
 	}
+	if loop, ok := n.(*ast.RangeStmt); ok && kind == "loop" {
+		d.Accesses = append(d.Accesses, x.rangeBindings(loop)...)
+		for _, binding := range []ast.Expr{loop.Key, loop.Value} {
+			if _, pointer := ast.Unparen(binding).(*ast.StarExpr); pointer {
+				d.Limitation = "A range value is written through a pointer on each iteration. Aliasing and the affected value are not tracked."
+			}
+		}
+	}
 	return d
 }
 
@@ -306,4 +314,25 @@ func (x *extractor) accesses(n ast.Node) []Access {
 		return true
 	})
 	return result
+}
+
+// rangeBindings records per-iteration assignments separately from range-expression and body reads.
+func (x *extractor) rangeBindings(loop *ast.RangeStmt) []Access {
+	var bindings []ast.Expr
+	for _, expression := range []ast.Expr{loop.Key, loop.Value} {
+		if expression == nil {
+			continue
+		}
+		if id, ok := expression.(*ast.Ident); ok && id.Name == "_" {
+			continue
+		}
+		bindings = append(bindings, expression)
+	}
+	accesses := x.accesses(&ast.AssignStmt{Lhs: bindings, Tok: loop.Tok})
+	for i := range accesses {
+		if accesses[i].Kind == "define" || accesses[i].Kind == "write" {
+			accesses[i].Mutation = "assign range binding on each iteration; " + accesses[i].Mutation
+		}
+	}
+	return accesses
 }
