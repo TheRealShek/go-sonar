@@ -419,14 +419,12 @@ export const sampleBackend: Backend = {
     );
     return {
       snapshot: 'sample-v1',
-      sites: sites
-        .slice(offset, offset + 40)
-        .map((edge) => ({
-          id: edge.id,
-          expression: edge.expression ?? edge.label,
-          evidence: edge.evidence,
-          certainty: edge.certainty,
-        })),
+      sites: sites.slice(offset, offset + 40).map((edge) => ({
+        id: edge.id,
+        expression: edge.expression ?? edge.label,
+        evidence: edge.evidence,
+        certainty: edge.certainty,
+      })),
       total: sites.length,
       offset,
     };
