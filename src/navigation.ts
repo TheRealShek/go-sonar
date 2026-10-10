@@ -16,6 +16,7 @@ export interface FlowTrail {
   steps: FlowStep[];
 }
 export interface NavigationFrame {
+  snapshot: string;
   request: GraphRequest;
   selectedId?: string;
   viewport?: Viewport;
@@ -165,4 +166,64 @@ export function boundRequest(request: GraphRequest): GraphRequest {
     outcomeOffsets: keep(request.outcomeOffsets, functions),
     regions,
   };
+}
+
+export interface NavigationState {
+  request?: GraphRequest;
+  history: NavigationFrame[];
+  future: NavigationFrame[];
+  trail?: FlowTrail;
+  calls: CallFrame[];
+  outcomeId?: string;
+  continuationCallId?: string;
+}
+
+export function refreshNavigation(
+  state: NavigationState,
+  previousSnapshot: string | undefined,
+  snapshot: string,
+): NavigationState {
+  if (previousSnapshot === snapshot) return state;
+  return {
+    request: state.request
+      ? {
+          ...state.request,
+          offsets: {},
+          regions: [],
+          behaviorAnchors: {},
+          outcomeOffsets: {},
+        }
+      : undefined,
+    history: [],
+    future: [],
+    calls: [],
+  };
+}
+
+export function flowAfterReveal(
+  trail: FlowTrail | undefined,
+  node: ViewNode,
+): { functionId: string; nodeId?: string } | undefined {
+  if (
+    !trail ||
+    trail.functionId !== node.parentId ||
+    trail.steps.at(-1)?.nodeId !== node.id ||
+    !node.details?.region
+  )
+    return undefined;
+  return { functionId: trail.functionId, nodeId: node.details.region.firstNodeId };
+}
+
+export function currentOperation(
+  trail?: FlowTrail,
+  continuationCallId?: string,
+): string | undefined {
+  return continuationCallId ?? trail?.steps.at(-1)?.nodeId;
+}
+
+export function frameMatchesSnapshot(
+  frame: NavigationFrame,
+  snapshot: string | undefined,
+): boolean {
+  return frame.snapshot === snapshot;
 }

@@ -62,10 +62,13 @@ export function FlowNavigator({
           execution.
         </p>
       )}
-      {continuationCallId && !trail && (
+      {continuationCallId && (
         <p className="notice">
           Returned to the original call occurrence. Highlighted control edges show its immediate
-          continuation.
+          continuation.{' '}
+          {trail &&
+            trail.steps.at(-1)?.nodeId !== continuationCallId &&
+            'The followed path remains at its previous operation.'}
         </p>
       )}
       {outcomeId && outcomePartial && (

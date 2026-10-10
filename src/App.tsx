@@ -17,6 +17,10 @@ import { EvidenceInspector } from './EvidenceInspector';
 import {
   canEnterCall,
   boundRequest,
+  refreshNavigation,
+  flowAfterReveal,
+  currentOperation,
+  frameMatchesSnapshot,
   followEdge,
   successors,
   outcomePaths,
@@ -130,6 +134,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [impact, setImpact] = useState('');
+  const [navigationNotice, setNavigationNotice] = useState('');
 
   const layout = useRef<LayoutClient | null>(null);
   const latest = useRef(new LatestRequest());
@@ -234,8 +239,9 @@ export default function App() {
   }, [project, browserKind, browserPackage, browserOffset]);
 
   const capture = (): NavigationFrame | undefined =>
-    request
+    request && project
       ? {
+          snapshot: project.snapshot,
           request,
           selectedId: selected?.id,
           viewport: flow.current?.getViewport(),
@@ -267,6 +273,12 @@ export default function App() {
   };
 
   const restore = (frame: NavigationFrame) => {
+    if (!frameMatchesSnapshot(frame, project?.snapshot)) {
+      setNavigationNotice(
+        'Saved navigation belongs to an older analysis. Start again from the current symbol.',
+      );
+      return;
+    }
     restored.current = frame;
     for (const [id, position] of Object.entries(frame.positions ?? {}))
       positions.current.set(id, position);
@@ -289,6 +301,7 @@ export default function App() {
 
   const loadProject = async (refresh = false) => {
     const current = projectLatest.current.next();
+    const previousFrame = capture();
     latest.current.invalidate();
     searchLatest.current.invalidate();
     sourceLatest.current.invalidate();
@@ -299,6 +312,11 @@ export default function App() {
     setSelected(undefined);
     setHovered(undefined);
     setPinned(false);
+    setNavigationNotice('');
+    restored.current = undefined;
+    pendingFlow.current = undefined;
+    pendingSelection.current = undefined;
+    if (hoverTimer.current) clearTimeout(hoverTimer.current);
 
     // Old facts are removed while a replacement snapshot is being analyzed.
     setView(undefined);
@@ -319,13 +337,33 @@ export default function App() {
           /* Recent paths are optional when storage is unavailable. */
         }
       }
-      if (refresh && request) setRequest({ ...request });
-      else {
+      if (refresh && request) {
+        const navigation = refreshNavigation(
+          { request, history, future, trail, calls, outcomeId, continuationCallId },
+          project?.snapshot,
+          summary.snapshot,
+        );
+        setRequest({ ...navigation.request! });
+        setHistory(navigation.history);
+        setFuture(navigation.future);
+        setTrail(navigation.trail);
+        setCalls(navigation.calls);
+        setOutcomeId(navigation.outcomeId);
+        setContinuationCallId(navigation.continuationCallId);
+        if (summary.snapshot !== project?.snapshot) {
+          positions.current.clear();
+          framedFocus.current = undefined;
+          setNavigationNotice(
+            'Analysis changed. Saved paths, call frames, and history were cleared. Start following from the current symbol.',
+          );
+        } else if (previousFrame) restored.current = previousFrame;
+      } else {
         positions.current.clear();
         setHistory([]);
         setFuture([]);
         setCalls([]);
         setTrail(undefined);
+        setContinuationCallId(undefined);
         setOutcomeId(undefined);
         framedFocus.current = undefined;
         restored.current = undefined;
@@ -686,6 +724,7 @@ export default function App() {
   const startFlow = (id: string) => {
     if (!request || busy) return;
     setOutcomeId(undefined);
+    setContinuationCallId(undefined);
     const entry =
       view?.behaviors?.find((b) => b.symbolId === id)?.entryId ??
       view?.nodes.find((node) => node.parentId === id && node.kind === 'entry')?.id;
@@ -702,11 +741,8 @@ export default function App() {
 
   const reveal = (node: ViewNode) => {
     if (!request || busy) return;
-    if (trail)
-      pendingFlow.current = {
-        functionId: trail.functionId,
-        nodeId: node.details?.region?.firstNodeId,
-      };
+    pendingFlow.current = flowAfterReveal(trail, node);
+    if (!pendingFlow.current) pendingSelection.current = node.details?.region?.firstNodeId;
     change(revealRegion(request, node));
   };
 
@@ -715,6 +751,7 @@ export default function App() {
     const next = followEdge(view, trail, edge.id);
     setTrail(next);
     setOutcomeId(undefined);
+    setContinuationCallId(undefined);
     if (edge.hiddenTargetId && request) {
       pendingFlow.current = { functionId: trail.functionId, nodeId: edge.hiddenTargetId };
       change({
@@ -761,6 +798,7 @@ export default function App() {
   const compareOutcome = (node: ViewNode) => {
     if (!request || busy || !node.parentId) return;
     setTrail(undefined);
+    setContinuationCallId(undefined);
     setOutcomeId(node.id);
     select(node);
     if (!view?.nodes.some((candidate) => candidate.id === node.id)) {
@@ -814,7 +852,7 @@ export default function App() {
       ?.symbolId ?? view?.nodes.find((node) => node.id === outcomeId)?.parentId;
   const comparedPaths =
     outcomeId && view ? outcomePaths(view, comparedFunction ?? view.focus, outcomeId) : undefined;
-  const currentOperation = trail?.steps.at(-1)?.nodeId ?? continuationCallId;
+  const activeOperation = currentOperation(trail, continuationCallId);
 
   const statusLabel = busy
     ? 'Analyzing / laying out…'
@@ -1143,6 +1181,11 @@ export default function App() {
             </button>
             <span role="status">{statusLabel}</span>
           </div>
+          {navigationNotice && (
+            <div className="notice" role="status">
+              {navigationNotice}
+            </div>
+          )}
           {error && (
             <div role="alert" className="error">
               {error}
@@ -1173,6 +1216,7 @@ export default function App() {
             onStep={step}
             onBack={() => {
               if (!trail || busy) return;
+              setContinuationCallId(undefined);
               const steps = trail.steps.slice(0, -1);
               setTrail({ ...trail, steps });
               const id = steps.at(-1)?.nodeId;
@@ -1194,6 +1238,7 @@ export default function App() {
             onStop={() => {
               setTrail(undefined);
               setOutcomeId(undefined);
+              setContinuationCallId(undefined);
             }}
           />
           <div
@@ -1217,12 +1262,12 @@ export default function App() {
                 return {
                   ...node,
                   selected: selected?.id === node.id,
-                  className: `${trail?.steps.at(-1)?.nodeId === node.id ? 'current-operation' : ''} ${paths && node.parentId && !paths.nodes.has(node.id) ? 'dimmed' : ''}`,
+                  className: `${activeOperation === node.id ? 'current-operation' : ''} ${paths && node.parentId && !paths.nodes.has(node.id) ? 'dimmed' : ''}`,
                 };
               })}
               edges={edges.map((edge) => {
                 const paths = comparedPaths;
-                const current = currentOperation;
+                const current = activeOperation;
                 return {
                   ...edge,
                   selected: selected?.id === edge.id,

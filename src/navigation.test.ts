@@ -3,6 +3,10 @@ import { sampleBackend } from './sample';
 import { requestFor } from './exploration';
 import {
   boundRequest,
+  refreshNavigation,
+  flowAfterReveal,
+  currentOperation,
+  frameMatchesSnapshot,
   canEnterCall,
   followEdge,
   focusViewport,
@@ -11,6 +15,8 @@ import {
   revealRegion,
   successors,
   type FlowTrail,
+  type NavigationState,
+  type CallFrame,
 } from './navigation';
 import type { ViewNode } from './shared/protocol';
 
@@ -155,5 +161,85 @@ describe('readable exploration defaults', () => {
     expect(view.edges).toHaveLength(1);
     expect(view.edges[0].siteCount).toBe(2);
     expect(view.edges[0].sites?.map((site) => site.evidence.line)).toEqual([26, 27]);
+  });
+});
+
+describe('navigation across disclosure, calls, and snapshots', () => {
+  const trail: FlowTrail = { functionId: 'get', steps: [{ nodeId: 'entry' }] };
+  const region = {
+    id: 'get/behavior/region',
+    parentId: 'get',
+    kind: 'region',
+    details: { region: { firstNodeId: 'later' } },
+  } as ViewNode;
+  it('does not teleport a followed entry when an unrelated region is disclosed', () => {
+    expect(flowAfterReveal(trail, region)).toBeUndefined();
+    expect(
+      flowAfterReveal({ ...trail, functionId: 'other', steps: [{ nodeId: region.id }] }, region),
+    ).toBeUndefined();
+    expect(flowAfterReveal({ ...trail, steps: [{ nodeId: region.id }] }, region)).toEqual({
+      functionId: 'get',
+      nodeId: 'later',
+    });
+  });
+  it('highlights the entered call continuation after returning to an unrelated trail', async () => {
+    const view = await behavior();
+    const id = currentOperation(trail, 'normalizing');
+    expect(id).toBe('normalizing');
+    expect(successors(view, id!).map((e) => e.target)).toEqual(['normalized']);
+    expect(currentOperation(trail)).toBe('entry');
+  });
+  it('rejects saved frames after the same occurrence ID is reused in a new snapshot', () => {
+    const frame = { snapshot: 'before', request: requestFor('get'), selectedId: 'reused-id' };
+    expect(frameMatchesSnapshot(frame, 'after')).toBe(false);
+    expect(frameMatchesSnapshot(frame, undefined)).toBe(false);
+    expect(frameMatchesSnapshot(frame, 'before')).toBe(true);
+  });
+  it('invalidates operation identities and saved navigation on a changed snapshot', () => {
+    const request = {
+      ...requestFor('get'),
+      internals: ['get'],
+      regions: [region.id],
+      behaviorAnchors: { get: 'reused-id' },
+      outcomeOffsets: { get: 30 },
+      offsets: { get: 8 },
+    };
+    const frame: CallFrame = {
+      snapshot: 'before',
+      request,
+      trail,
+      callId: 'reused-id',
+      targetId: 'normalize',
+      expression: 'second()',
+      sourceLine: 4,
+      continuationIds: ['next'],
+      viewport: { x: 20, y: 30, zoom: 1 },
+    };
+    const state: NavigationState = {
+      request,
+      history: [frame],
+      future: [frame],
+      calls: [frame],
+      trail,
+      outcomeId: 'return-id',
+      continuationCallId: 'reused-id',
+    };
+    // New analysis can assign reused-id to first(); no old occurrence state may survive it.
+    const changed = refreshNavigation(state, 'before', 'after');
+    expect(changed.history).toEqual([]);
+    expect(changed.future).toEqual([]);
+    expect(changed.calls).toEqual([]);
+    expect(changed.trail).toBeUndefined();
+    expect(changed.outcomeId).toBeUndefined();
+    expect(changed.continuationCallId).toBeUndefined();
+    expect(changed.request).toMatchObject({
+      focus: 'get',
+      internals: ['get'],
+      regions: [],
+      behaviorAnchors: {},
+      outcomeOffsets: {},
+      offsets: {},
+    });
+    expect(refreshNavigation(state, 'before', 'before')).toBe(state);
   });
 });

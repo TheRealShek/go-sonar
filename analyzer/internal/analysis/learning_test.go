@@ -309,3 +309,47 @@ func TestRangeBindings(t *testing.T) {
 		t.Fatal("range field write missing from relationship graph")
 	}
 }
+
+// TestBehaviorIDsAreSnapshotLocal reproduces ID reuse after removing an operation.
+func TestBehaviorIDsAreSnapshotLocal(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "go.mod", "module example.test/snapshots\n\ngo 1.26.0\n")
+	source := `package snapshots
+ func first() {}
+ func second() {}
+ func Caller() { first(); second() }
+ `
+	write(t, root, "main.go", source)
+	engine := &testEngine{}
+	before := analyze(t, engine, root)
+	old := map[string]string{}
+	for _, pkg := range before.Packages {
+		for _, behavior := range pkg.Behaviors {
+			if strings.HasSuffix(behavior.SymbolID, "::Caller") {
+				for _, node := range behavior.Nodes {
+					if node.Kind == "call" {
+						old[node.ID] = node.Label
+					}
+				}
+			}
+		}
+	}
+	write(t, root, "main.go", strings.Replace(source, "first(); second()", "first()", 1))
+	after := analyze(t, engine, root)
+	if before.Snapshot == after.Snapshot {
+		t.Fatal("source edit did not change snapshot")
+	}
+	var reused bool
+	for _, pkg := range after.Packages {
+		for _, behavior := range pkg.Behaviors {
+			for _, node := range behavior.Nodes {
+				if old[node.ID] == "second()" && node.Label == "first()" {
+					reused = true
+				}
+			}
+		}
+	}
+	if !reused {
+		t.Fatal("operation ID reuse scenario was not exercised", old)
+	}
+}
