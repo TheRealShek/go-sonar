@@ -158,3 +158,9 @@ Validation passed:
 - Standards and specification reviews. One stale guide sentence about Symbols controls was corrected; no code findings remained.
 
 The T3 preview snapshot timed out twice, so browser acceptance used local Chromium. Native WebKit presentation and clipboard/folder transports were not exercised in this run. Retained landmarks and manual dragging can invalidate calculated routes; rounded relationship fallbacks and square Flow fallbacks can cross other nodes. These checks do not establish a performance budget or guarantee obstacle avoidance for those fallback paths.
+
+### Standalone launch correction
+
+The plain `cargo build --release --workspace` binary above still used Tauri's development-server URL. Launching it without that server produced a connection-refused page. Rebuilding with the documented `npm run desktop:build -- --no-bundle` command enabled the standalone asset protocol and replaced `target/release/go-sonar` with the correct desktop build.
+
+One native background cycle against LLM Gate then completed through Tauri IPC, WebKit, the layout worker, and the real analyzer/backend without a timeout. This verifies embedded frontend loading and DOM commits, not displayed frames. LLM Gate's 22 file hashes and Git status remained unchanged. The raw local report is `/tmp/sonar-rounded-native-check.json`.
