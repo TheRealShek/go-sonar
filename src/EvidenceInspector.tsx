@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { backend } from './backend';
 import { formatSource } from './GraphCards';
+import { symbolName, nodeName } from './identity';
 import type {
   Access,
   GraphRequest,
@@ -122,37 +123,82 @@ export function EvidenceInspector({
           .map((access) => ({ node: candidate, access })),
       ) ?? [])
     : [];
+  const sourceContent = (
+    <>
+      {source && <p className="source-location">{formatSource(source)}</p>}
+      {source && localSource ? (
+        <button onClick={() => onSource(source)}>Open source evidence</button>
+      ) : (
+        <>
+          <p className="notice">
+            Declaration source is unavailable or outside this project. Inspect a local call site
+            instead.
+          </p>
+          {callers?.map((edge) => (
+            <button className="match" key={edge.id} onClick={() => onSelect(edge)}>
+              Local call from {view?.nodes.find((node) => node.id === edge.source)?.name} · line{' '}
+              {edge.evidence.line}
+            </button>
+          ))}
+        </>
+      )}
+      {excerpt && (
+        <div className="source">
+          <small>
+            {excerpt.file} · from line {excerpt.firstLine}
+          </small>
+          <pre>
+            {excerpt.text.split('\n').map((line, index) => (
+              <span
+                className={
+                  evidence &&
+                  excerpt.firstLine + index >= evidence.line &&
+                  excerpt.firstLine + index <= evidence.endLine
+                    ? 'source-highlight'
+                    : ''
+                }
+                key={index}
+              >
+                {String(excerpt.firstLine + index).padStart(4)} {line}
+              </span>
+            ))}
+          </pre>
+        </div>
+      )}
+    </>
+  );
   return (
     <>
       <h2>Context & evidence</h2>
       {selected && (
         <>
           <small>{selected.kind}</small>
-          <h3>{node?.name ?? edge?.label}</h3>
+          <h3>{node ? symbolName(node) : edge?.label}</h3>
           {node ? (
             <>
-              <code>{node.signature || node.details?.expression}</code>
+              {node.details && (
+                <p className="operation-explanation">
+                  {node.details.explanation ||
+                    'No operation explanation is available. Inspect the source evidence.'}
+                </p>
+              )}
+              {node.details?.limitation && (
+                <p className="notice operation-limitation">{node.details.limitation}</p>
+              )}
+              {call && call.dispatch !== 'direct' && (
+                <p className="notice operation-limitation">
+                  {call.dispatch === 'interface' ? 'Interface contract' : 'Dynamic callable'}{' '}
+                  established. The implementation is unresolved; entering a compatible
+                  implementation would guess the target.
+                </p>
+              )}
+              <code>{node.details?.expression || node.signature}</code>
               <p className="source-location">{node.packageId}</p>
-              {node.details ? (
-                <p>{node.details.explanation}</p>
-              ) : (
-                <p>
-                  {node.documentation
-                    ? `Documentation: ${node.documentation}`
-                    : 'No documented purpose supplied. Design intent is unknown.'}
-                </p>
+              {node.details && sourceContent}
+              {!node.details && !node.documentation && (
+                <p>No documented purpose supplied. Design intent is unknown.</p>
               )}
-              {node.parentId && (
-                <p className="muted">
-                  Within{' '}
-                  {view?.nodes.find((parent) => parent.id === node.parentId)?.name ??
-                    node.qualifiedName}
-                  . Static source structure; path feasibility is unknown.
-                </p>
-              )}
-              {node.details?.limitation && <p className="notice">{node.details.limitation}</p>}
               <div className="actions">
-                <button onClick={() => onShow(node)}>Show selected node</button>
                 {!node.parentId && (
                   <>
                     <button disabled={busy} onClick={() => onFocus(node.id, node.kind)}>
@@ -206,22 +252,33 @@ export function EvidenceInspector({
                     Reveal region
                   </button>
                 )}
+                {node.parentId && !canEnterCall(node) && !node.details?.region && (
+                  <button disabled={busy || !!impact} onClick={() => onFollow(node.parentId!)}>
+                    View function flow
+                  </button>
+                )}
+                <button onClick={() => onShow(node)}>Show selected node</button>
               </div>
+              {node.documentation && (
+                <details>
+                  <summary>Documentation</summary>
+                  <p>{node.documentation}</p>
+                </details>
+              )}
+              {node.parentId && (
+                <p className="muted">
+                  Within {nodeName(view?.nodes, node.parentId, node.qualifiedName)}. Static source
+                  structure; path feasibility is unknown.
+                </p>
+              )}
               {call && (
-                <section className="call-boundary" aria-label="Call boundary">
-                  <h3>Arguments and returned positions</h3>
+                <details className="call-boundary">
+                  <summary>Arguments and returned positions</summary>
                   <small>Type-resolved callable signature</small>
                   <code>{call.signature}</code>
                   {call.receiver && (
                     <p>
                       Receiver: <code>{call.receiver}</code>
-                    </p>
-                  )}
-                  {call.dispatch !== 'direct' && (
-                    <p className="notice">
-                      {call.dispatch === 'interface' ? 'Interface contract' : 'Dynamic callable'}{' '}
-                      established. The implementation is unresolved; entering a compatible
-                      implementation would guess the target.
                     </p>
                   )}
                   {call.arguments.map((argument, index) => (
@@ -248,11 +305,11 @@ export function EvidenceInspector({
                     These are source mappings. Passing an argument does not prove its influence on a
                     returned value. Aliasing and interprocedural value dependence are not tracked.
                   </p>
-                </section>
+                </details>
               )}
               {!!node.details?.accesses?.length && (
-                <section aria-label="Reads, writes, and definitions">
-                  <h3>Reads, writes, and definitions</h3>
+                <details>
+                  <summary>Reads, writes, and definitions</summary>
                   {node.details.accesses.map((access, index) => (
                     <div className="access" key={index}>
                       <code>{access.expression}</code>
@@ -285,7 +342,7 @@ export function EvidenceInspector({
                       ))}
                     </>
                   )}
-                </section>
+                </details>
               )}
               {!node.parentId && summary && (
                 <section aria-label="Hidden relationships">
@@ -323,7 +380,7 @@ export function EvidenceInspector({
                           >
                             Show only {group.direction} {group.kind.replace('_', ' ')}{' '}
                             {group.direction === 'incoming' ? 'from' : 'to'} {group.packageId} for{' '}
-                            {node.name}
+                            {symbolName(node)}
                           </button>
                         </div>
                       ))}
@@ -386,8 +443,8 @@ export function EvidenceInspector({
             edge && (
               <>
                 <p>
-                  {view?.nodes.find((node) => node.id === edge.source)?.name ?? 'Caller'} →{' '}
-                  {view?.nodes.find((node) => node.id === edge.target)?.name ?? 'Target'}
+                  {nodeName(view?.nodes, edge.source, 'Caller')} →{' '}
+                  {nodeName(view?.nodes, edge.target, 'Target')}
                 </p>
                 <code>{view?.nodes.find((node) => node.id === edge.target)?.signature}</code>
                 <p>
@@ -433,46 +490,7 @@ export function EvidenceInspector({
               </>
             )
           )}
-          {source && <p className="source-location">{formatSource(source)}</p>}
-          {source && localSource ? (
-            <button onClick={() => onSource(source)}>Open source evidence</button>
-          ) : (
-            <>
-              <p className="notice">
-                Declaration source is unavailable or outside this project. Inspect a local call site
-                instead.
-              </p>
-              {callers?.map((edge) => (
-                <button className="match" key={edge.id} onClick={() => onSelect(edge)}>
-                  Local call from {view?.nodes.find((node) => node.id === edge.source)?.name} · line{' '}
-                  {edge.evidence.line}
-                </button>
-              ))}
-            </>
-          )}
-          {excerpt && (
-            <div className="source">
-              <small>
-                {excerpt.file} · from line {excerpt.firstLine}
-              </small>
-              <pre>
-                {excerpt.text.split('\n').map((line, index) => (
-                  <span
-                    className={
-                      evidence &&
-                      excerpt.firstLine + index >= evidence.line &&
-                      excerpt.firstLine + index <= evidence.endLine
-                        ? 'source-highlight'
-                        : ''
-                    }
-                    key={index}
-                  >
-                    {String(excerpt.firstLine + index).padStart(4)} {line}
-                  </span>
-                ))}
-              </pre>
-            </div>
-          )}
+          {!node?.details && sourceContent}
         </>
       )}
       {!selected && (
@@ -496,7 +514,7 @@ export function EvidenceInspector({
               <option value="">Choose a node</option>
               {view.nodes.map((node) => (
                 <option key={node.id} value={node.id}>
-                  {node.kind} · {node.name}
+                  {node.kind} · {symbolName(node)}
                 </option>
               ))}
             </select>
@@ -513,8 +531,7 @@ export function EvidenceInspector({
               <option value="">Choose a connection</option>
               {view.edges.map((edge) => (
                 <option key={edge.id} value={edge.id}>
-                  {view.nodes.find((node) => node.id === edge.source)?.name} →{' '}
-                  {view.nodes.find((node) => node.id === edge.target)?.name} ·{' '}
+                  {nodeName(view.nodes, edge.source)} → {nodeName(view.nodes, edge.target)} ·{' '}
                   {edge.label || edge.kind}
                 </option>
               ))}
@@ -522,12 +539,6 @@ export function EvidenceInspector({
           </label>
         </details>
       )}
-      <hr />
-      <p className="legend">
-        Arrows show relationship direction. Teal control edges show source order. Dependency
-        placement has no execution order. Dashed edges mark unresolved possibilities; loop-back
-        edges use a separate dashed route.
-      </p>
     </>
   );
 }

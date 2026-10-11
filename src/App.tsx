@@ -12,7 +12,9 @@ import {
 } from '@xyflow/react';
 import { backend, isDesktop, chooseProjectFolder } from './backend';
 import { nodeTypes, IdentityCard, type SymbolNode } from './GraphCards';
-import { FlowNavigator } from './FlowNavigator';
+import { FlowNavigator, BranchHistory } from './FlowNavigator';
+import { GraphLegend, edgeLabel, relationshipColors, selectionConnections } from './GraphEdges';
+import { symbolName, operationName, nodeName } from './identity';
 import { EvidenceInspector } from './EvidenceInspector';
 import { ConnectionSummary } from './ConnectionSummary';
 import {
@@ -276,7 +278,7 @@ export default function App() {
           snapshot: project.snapshot,
           request,
           selectedId: selected?.id,
-          focusLabel: view?.nodes.find((node) => node.id === request.focus)?.name,
+          focusLabel: nodeName(view?.nodes, request.focus, request.focus),
           focusLine: view?.nodes.find((node) => node.id === request.focus)?.source.line,
           viewport: flow.current?.getViewport(),
           trail,
@@ -464,7 +466,7 @@ export default function App() {
             parentId: node.parentId,
             role: node.details?.role,
             width: grouped.has(node.id) ? 650 : 220,
-            height: grouped.has(node.id) ? 450 : 88,
+            height: grouped.has(node.id) ? 450 : node.parentId ? 136 : 112,
             position: sameGroup && old ? { x: old.x, y: old.y } : undefined,
           };
         }),
@@ -525,7 +527,7 @@ export default function App() {
             return {
               id: node.id,
               type: 'symbol',
-              ariaLabel: `${node.kind}: ${node.name}${newlyRevealed.has(node.id) ? ' · newly revealed' : ''}`,
+              ariaLabel: `${node.kind}: ${operationName(node)} · ${node.packageId}${newlyRevealed.has(node.id) ? ' · newly revealed' : ''}`,
               parentId: node.parentId,
               extent: node.parentId ? ('parent' as const) : undefined,
               position,
@@ -533,7 +535,8 @@ export default function App() {
               height: size.height,
               style: size,
               data: {
-                label: node.name,
+                label: operationName(node),
+                packageId: node.packageId,
                 newlyRevealed: newlyRevealed.has(node.id),
                 kind: node.kind,
                 grouped: grouped.has(node.id),
@@ -552,10 +555,8 @@ export default function App() {
             id: edge.id,
             source: edge.source,
             target: edge.target,
-            label: edge.loopBack
-              ? `${edge.label || 'continue'} · loop back`
-              : edge.label || edge.kind,
-            ariaLabel: `${result.nodes.find((node) => node.id === edge.source)?.name} to ${result.nodes.find((node) => node.id === edge.target)?.name}: ${edge.label || edge.kind}`,
+            label: edgeLabel(edge),
+            ariaLabel: `${nodeName(result.nodes, edge.source)} to ${nodeName(result.nodes, edge.target)}: ${edgeLabel(edge)}`,
             type: edge.loopBack ? 'smoothstep' : 'default',
             sourceHandle:
               edge.kind !== 'control' &&
@@ -566,13 +567,15 @@ export default function App() {
                   : ['false', 'done'].includes(edge.label)
                     ? 'branch-false'
                     : undefined,
-            markerEnd: { type: MarkerType.ArrowClosed },
-            style: {
-              stroke:
-                edge.kind === 'data' ? '#9e61cf' : edge.kind === 'control' ? '#277e88' : '#52647d',
-              strokeDasharray: edge.certainty === 'possible' || edge.loopBack ? '6 4' : undefined,
+            markerEnd: {
+              type: MarkerType.ArrowClosed,
+              color: relationshipColors[edge.kind] ?? '#52647d',
             },
-            labelStyle: { fontSize: 11 },
+            style: {
+              stroke: relationshipColors[edge.kind] ?? '#52647d',
+              strokeDasharray: edge.certainty === 'possible' ? '6 4' : undefined,
+            },
+            labelStyle: { fontSize: 11, fill: '#30485f' },
             reconnectable: false,
           })),
         );
@@ -811,7 +814,7 @@ export default function App() {
         x: at.x + (parent?.x ?? 0),
         y: at.y + (parent?.y ?? 0),
         width: at.width,
-        height: Math.min(at.height, 100),
+        height: node.parentId ? at.height : Math.min(at.height, 100),
       },
       bounds,
       centered,
@@ -999,11 +1002,15 @@ export default function App() {
   const connectionSummary = view?.summaries.find(
     (summary) => summary.nodeId === connectionNode?.id,
   );
+  const connected = selectionConnections(view, selected?.id);
 
   const breadcrumbs = explorationBreadcrumbs(history, request?.focus);
   const collapseTarget = selectedNode?.parentId ?? selectedNode?.id;
-  const collapseName =
-    view?.nodes.find((node) => node.id === collapseTarget)?.name ?? selectedNode?.name;
+  const collapseName = nodeName(
+    view?.nodes,
+    collapseTarget,
+    selectedNode ? symbolName(selectedNode) : '',
+  );
   const canCollapseSelected =
     !!request &&
     !!collapseTarget &&
@@ -1119,7 +1126,7 @@ export default function App() {
                 key={symbol.id}
                 onClick={() => focusSymbol(symbol.id, symbol.kind)}
               >
-                <strong>{symbol.name}</strong>
+                <strong>{symbolName(symbol)}</strong>
                 <small>
                   {symbol.kind} · {symbol.packageId}
                 </small>
@@ -1208,7 +1215,7 @@ export default function App() {
                   className="match"
                   onClick={() => focusSymbol(symbol.id, symbol.kind)}
                 >
-                  {symbol.name}
+                  {symbolName(symbol)}
                   <small>
                     {symbol.kind} · {symbol.packageId}
                   </small>
@@ -1404,7 +1411,7 @@ export default function App() {
               aria-label="Reset exploration"
             >
               <p>
-                Reset to {focusNode?.name ?? 'the focused declaration'} closes{' '}
+                Reset to {focusNode ? symbolName(focusNode) : 'the focused declaration'} closes{' '}
                 {request.expanded.length} expanded neighbor branches and {request.internals.length}{' '}
                 function behaviors. It clears package filters, region and page detail, and ends
                 walkthrough and call navigation. Relationship filters and saved explorations remain
@@ -1445,13 +1452,13 @@ export default function App() {
                     </button>
                   </li>
                 ))}
-                <li aria-current="location">{focusNode?.name ?? view.focus}</li>
+                <li aria-current="location">{focusNode ? symbolName(focusNode) : view.focus}</li>
               </ol>
             </nav>
           )}
           {view && (
             <div className="exploration-context" role="status">
-              <span>Exploring {focusNode?.name ?? view.focus}</span>
+              <span>Exploring {focusNode ? symbolName(focusNode) : view.focus}</span>
               {trail && (
                 <span>
                   {trail.paused ? 'Paused at' : 'Following'}{' '}
@@ -1469,7 +1476,7 @@ export default function App() {
               {selected && (
                 <span>
                   {inspectorOpen ? 'Inspecting' : 'Selected'}{' '}
-                  {selectedNode?.name ??
+                  {(selectedNode ? operationName(selectedNode) : undefined) ??
                     ('label' in selected ? selected.label || selected.kind : selected.kind)}
                 </span>
               )}
@@ -1559,6 +1566,8 @@ export default function App() {
               setContinuationCallId(undefined);
             }}
           />
+          <BranchHistory trail={trail} />
+          {view && <GraphLegend view={view} />}
           <div
             className={`canvas ${animateLayout ? 'layout-changing' : ''}`}
             ref={canvas}
@@ -1580,7 +1589,7 @@ export default function App() {
                 return {
                   ...node,
                   selected: selected?.id === node.id,
-                  className: `${node.data.newlyRevealed ? 'newly-revealed' : ''} ${activeOperation === node.id ? 'current-operation' : ''} ${paths && node.parentId && !paths.nodes.has(node.id) ? 'dimmed' : ''}`,
+                  className: `${node.data.newlyRevealed ? 'newly-revealed' : ''} ${connected.endpoints.has(node.id) ? 'connected-endpoint' : ''} ${activeOperation === node.id ? 'current-operation' : ''} ${paths && node.parentId && !paths.nodes.has(node.id) && !connected.endpoints.has(node.id) ? 'dimmed' : ''}`,
                 };
               })}
               edges={edges.map((edge) => {
@@ -1589,17 +1598,7 @@ export default function App() {
                 return {
                   ...edge,
                   selected: selected?.id === edge.id,
-                  className:
-                    paths && !paths.edges.has(edge.id)
-                      ? 'dimmed'
-                      : view?.edges.some(
-                            (candidate) =>
-                              candidate.id === edge.id &&
-                              candidate.source === current &&
-                              candidate.kind === 'control',
-                          )
-                        ? 'next-operation'
-                        : '',
+                  className: `${selected ? (connected.edges.has(edge.id) ? 'connected-relationship' : 'dimmed') : paths && !paths.edges.has(edge.id) ? 'dimmed' : ''} ${view?.edges.some((candidate) => candidate.id === edge.id && candidate.source === current && candidate.kind === 'control') ? 'next-operation' : ''}`,
                 };
               })}
               nodeTypes={nodeTypes}

@@ -1,4 +1,5 @@
 import type { GraphRequest, GraphView, ViewEdge, ViewNode } from './shared/protocol';
+import { operationName } from './identity';
 
 export interface Viewport {
   x: number;
@@ -10,6 +11,7 @@ export interface FlowStep {
   edgeId?: string;
   condition?: string;
   branch?: string;
+  destination?: string;
 }
 export interface FlowTrail {
   functionId: string;
@@ -72,6 +74,29 @@ export function successors(view: GraphView, nodeId: string): ViewEdge[] {
   return view.edges.filter((edge) => edge.kind === 'control' && edge.source === nodeId);
 }
 
+function flowDestination(view: GraphView, edge: ViewEdge): string {
+  const target =
+    view.nodes.find((node) => node.id === (edge.hiddenTargetId ?? edge.target)) ??
+    view.nodes.find((node) => node.id === edge.target);
+  return target && !['region', 'boundary'].includes(target.kind)
+    ? operationName(target)
+    : `reveal region${target?.source.line ? ` at line ${target.source.line}` : ''}`;
+}
+
+export function flowChoice(view: GraphView, current: ViewNode, edge: ViewEdge): string {
+  const destination = flowDestination(view, edge);
+  if (['condition', 'loop'].includes(current.kind)) {
+    const expression = operationName(current);
+    const condition = ['false', 'done'].includes(edge.label)
+      ? 'Otherwise'
+      : ['true', 'iterate', 'next item'].includes(edge.label)
+        ? expression
+        : `${expression} · ${edge.label || 'branch'}`;
+    return `${condition} → ${destination}${edge.loopBack ? ' · loop back' : ''}`;
+  }
+  return `${destination}${edge.loopBack ? ' · loop back' : ''}`;
+}
+
 export function followEdge(view: GraphView, trail: FlowTrail, edgeId: string): FlowTrail {
   if (trail.steps.length >= MAX_FLOW_STEPS) return trail;
   const current = trail.steps.at(-1)?.nodeId;
@@ -89,7 +114,13 @@ export function followEdge(view: GraphView, trail: FlowTrail, edgeId: string): F
       {
         nodeId: edge.target,
         edgeId,
-        ...(choice ? { condition: node.details?.expression ?? node.name, branch: edge.label } : {}),
+        ...(choice
+          ? {
+              condition: node.details?.expression ?? node.name,
+              branch: edge.label,
+              destination: flowDestination(view, edge),
+            }
+          : {}),
       },
     ],
   };

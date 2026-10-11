@@ -1,5 +1,6 @@
 import type { GraphRequest, GraphSummary, GraphView, ViewNode } from './shared/protocol';
 import { clearGroup, neighborPage, RELATIONS, toggleId } from './exploration';
+import { symbolName, nodeName } from './identity';
 
 export function ConnectionSummary({
   node,
@@ -30,7 +31,7 @@ export function ConnectionSummary({
     <section className="connection-summary" aria-label="Graph connections">
       <div className="actions">
         <strong>
-          {node.name}: {shown} connections shown
+          {symbolName(node)}: {shown} connections shown
         </strong>
         {summary.hidden > 0 && <span>· {summary.hidden} more source sites</span>}
         {!!summary.filtered && <span>· {summary.filtered} hidden by filters</span>}
@@ -84,11 +85,11 @@ export function ConnectionSummary({
               key={id}
               disabled={busy}
               className="filter-chip"
-              aria-label={`Remove connection filter for ${view.nodes.find((candidate) => candidate.id === id)?.name ?? id}`}
+              aria-label={`Remove connection filter for ${nodeName(view.nodes, id, id)}`}
               onClick={() => onRequest(clearGroup(request, id))}
             >
-              {view.nodes.find((candidate) => candidate.id === id)?.name ?? id}: {group.direction}{' '}
-              {group.kind.replace('_', ' ')} · {group.packageId} ×
+              {nodeName(view.nodes, id, id)}: {group.direction} {group.kind.replace('_', ' ')} ·{' '}
+              {group.packageId} ×
             </button>
           ))}
         </div>

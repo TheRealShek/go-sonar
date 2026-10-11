@@ -1,11 +1,40 @@
 import type { GraphView, ViewNode, ViewEdge, GraphRequest } from './shared/protocol';
 import {
   successors,
+  flowChoice,
   explorationDestination,
   MAX_FLOW_STEPS,
   type FlowTrail,
   type CallFrame,
 } from './navigation';
+import { symbolName } from './identity';
+import { useEffect, useRef } from 'react';
+
+export function BranchHistory({ trail }: { trail?: FlowTrail }) {
+  const strip = useRef<HTMLOListElement>(null);
+  useEffect(() => {
+    if (strip.current) strip.current.scrollLeft = strip.current.scrollWidth;
+  }, [trail?.steps.length]);
+  const choices = trail?.steps.filter((step) => step.condition) ?? [];
+  if (!choices.length) return null;
+  return (
+    <ol ref={strip} className="conditions" aria-label="Chosen conditions">
+      {choices.map((step, index) => (
+        <li
+          key={index}
+          title={`${step.condition} · ${step.branch} → ${step.destination ?? 'saved branch'}`}
+        >
+          <code>
+            {['false', 'done'].includes(step.branch ?? '')
+              ? `Otherwise (${step.condition})`
+              : step.condition}
+          </code>{' '}
+          → {step.destination ?? step.branch}
+        </li>
+      ))}
+    </ol>
+  );
+}
 
 export function FlowNavigator({
   view,
@@ -62,6 +91,7 @@ export function FlowNavigator({
   const previousDestination = previous
     ? `${previous.name} · line ${previous.source.line}`
     : `saved operation at step ${Math.max(1, (trail?.steps.length ?? 1) - 1)}`;
+  const overview = view.nodes.find((node) => node.id === functionId);
   return (
     <div className="flow-navigation">
       {calls.length > 0 && (
@@ -146,21 +176,8 @@ export function FlowNavigator({
             <strong>
               {trail.paused ? 'Paused' : 'Following'}: {current?.name ?? 'Hidden operation'}
             </strong>
-            <span>
-              Step {trail.steps.length} / {MAX_FLOW_STEPS}
-            </span>
+            <span>Step {trail.steps.length}</span>
           </div>
-          {trail.steps.some((step) => step.condition) && (
-            <ol className="conditions" aria-label="Chosen conditions">
-              {trail.steps
-                .filter((step) => step.condition)
-                .map((step, index) => (
-                  <li key={index}>
-                    <code>{step.condition}</code> → {step.branch}
-                  </li>
-                ))}
-            </ol>
-          )}
           <div className="actions">
             <button
               disabled={busy || trail.paused || trail.steps.length <= 1}
@@ -180,14 +197,7 @@ export function FlowNavigator({
                   disabled={busy || trail.paused || trail.steps.length >= MAX_FLOW_STEPS}
                   onClick={() => onStep(edge)}
                 >
-                  {current?.kind === 'loop'
-                    ? ['iterate', 'next item'].includes(edge.label)
-                      ? 'Follow body'
-                      : ['false', 'done'].includes(edge.label)
-                        ? 'Follow exit'
-                        : edge.label
-                    : edge.label || 'Next operation'}
-                  {edge.hiddenTargetId ? ' · reveal' : ''}
+                  {flowChoice(view, current!, edge)}
                 </button>
               ))
             )}
@@ -204,16 +214,12 @@ export function FlowNavigator({
           )}
           {trail.steps.length >= MAX_FLOW_STEPS && (
             <p className="notice">
-              Step limit reached. Use Previous step or restart. Loops stay bounded.
+              Safety limit of {MAX_FLOW_STEPS} steps reached. Use Previous step or restart.
             </p>
           )}
         </>
       )}
-      {behavior && (
-        <p>
-          Behavior overview: {view.nodes.find((node) => node.id === functionId)?.name ?? functionId}
-        </p>
-      )}
+      {behavior && <p>Behavior overview: {overview ? symbolName(overview) : functionId}</p>}
       {behavior && (
         <details className="outcomes" open={!!outcomeId}>
           <summary>

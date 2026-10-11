@@ -237,6 +237,35 @@ main {
   white-space: nowrap;
 }
 
+.symbol-card .behavior-expression {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 18px;
+  max-height: 54px;
+}
+
+.symbol-card .node-package {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.connected-endpoint .symbol-card {
+  border-color: #327eb9;
+  box-shadow: 0 0 0 1px #327eb9;
+}
+
+.connected-relationship .react-flow__edge-path {
+  stroke-width: 2.5;
+}
+.connected-relationship .react-flow__edge-text {
+  font-weight: 700;
+}
+
 .symbol-card small {
   font-size: 10px;
   color: #557b94;
@@ -475,8 +504,50 @@ summary:focus-visible {
   color: #4c6580;
 }
 .conditions {
-  padding-left: 20px;
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+  overflow-x: auto;
+  list-style: none;
+  padding: 7px 12px;
+  margin: 0;
+  background: #f5f9fd;
+  border-bottom: 1px solid #ced7e1;
   font-size: 12px;
+}
+.conditions li {
+  flex-shrink: 0;
+  white-space: nowrap;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 4px 7px;
+  border: 1px solid #afc5d8;
+  border-radius: 4px;
+}
+.graph-legend {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  padding: 7px 12px;
+  background: #fff;
+  border-bottom: 1px solid #ced7e1;
+  font-size: 11px;
+}
+.graph-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.legend-line {
+  display: inline-block;
+  width: 22px;
+  border-top: 2px solid #52647d;
+}
+.legend-line.possible {
+  border-top-style: dashed;
 }
 .call-breadcrumb {
   display: flex;
