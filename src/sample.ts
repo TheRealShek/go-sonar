@@ -464,6 +464,19 @@ export const sampleBackend: Backend = {
       offset,
     };
   },
+  find: async (query, kind, packageId, offset) => {
+    const filtered = symbols.filter(
+      (node) =>
+        (!kind || node.kind === kind) &&
+        (!packageId || node.packageId === packageId) &&
+        `${node.name} ${node.qualifiedName}`.toLowerCase().includes(query.toLowerCase()),
+    );
+    return {
+      symbols: filtered.slice(offset, offset + 40).map((node) => ({ ...node, exported: true })),
+      total: filtered.length,
+      offset,
+    };
+  },
   discovery: async () => ({ entrypoints: [], packages: ['sample/catalog'], packageCount: 1 }),
   relationSites: async (from, to, kind, offset) => {
     const sites = relations.filter(

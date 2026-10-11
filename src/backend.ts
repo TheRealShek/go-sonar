@@ -21,6 +21,7 @@ export interface Backend {
   refresh(): Promise<ProjectSummary>;
   search(query: string): Promise<SymbolFact[]>;
   browse(kind: string, packageId: string, offset: number): Promise<SymbolPage>;
+  find(query: string, kind: string, packageId: string, offset: number): Promise<SymbolPage>;
   discovery(): Promise<Discovery>;
   relationSites(
     source: string,
@@ -40,6 +41,8 @@ const transport: Backend = isDesktop
       search: (query) => invoke('search_symbols', { query, limit: 40 }),
       browse: (kind, packageId, offset) =>
         invoke('browse_symbols', { kind, package: packageId, offset }),
+      find: (query, kind, packageId, offset) =>
+        invoke('find_symbols', { query, kind, package: packageId, offset }),
       discovery: () => invoke('discover_project'),
       relationSites: (source, target, kind, offset) =>
         invoke('relation_sites', { source, target, kind, offset }),
@@ -51,12 +54,17 @@ const transport: Backend = isDesktop
 
 const views = new QueryQueue<GraphView>();
 const searches = new QueryQueue<SymbolFact[]>();
+const discoveries = new QueryQueue<SymbolPage>();
+const sources = new QueryQueue<SourceExcerpt>();
 
 export const backend: Backend = {
   ...transport,
+  source: (span) => sources.execute(() => transport.source(span)),
   graph: (request) => views.execute(() => transport.graph(request)),
   impact: (symbolId, category) => views.execute(() => transport.impact(symbolId, category)),
   search: (query) => searches.execute(() => transport.search(query)),
+  find: (query, kind, packageId, offset) =>
+    discoveries.execute(() => transport.find(query, kind, packageId, offset)),
 };
 
 export const benchmarkConfig = (): Promise<BenchmarkConfig | null> =>

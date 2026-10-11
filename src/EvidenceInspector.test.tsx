@@ -22,6 +22,11 @@ const actions = {
   onShow: noop,
   onGroup: noop,
   onClearGroup: noop,
+  onRetrySource: noop,
+  onRefreshSource: noop,
+  onBinding: noop,
+  onDismissBinding: noop,
+  onOccurrence: noop,
 };
 async function render(updates: Partial<ComponentProps<typeof EvidenceInspector>> = {}) {
   const request = { ...requestFor('get'), internals: ['get'] };
@@ -31,6 +36,8 @@ async function render(updates: Partial<ComponentProps<typeof EvidenceInspector>>
     <EvidenceInspector
       {...actions}
       busy={false}
+      sourceLoading={false}
+      sourceError=""
       impact=""
       callDepth={0}
       root="/sample"
@@ -55,7 +62,7 @@ describe('operation comprehension', () => {
     });
     const explanation = html.indexOf('operation-explanation');
     const limitation = html.indexOf('Values are not tracked.');
-    const source = html.indexOf('Open source evidence');
+    const source = html.indexOf('aria-label="Source evidence"');
     const action = html.indexOf('Enter this call');
     const mapping = html.indexOf('<summary>Arguments and returned positions</summary>');
     expect(explanation).toBeGreaterThan(-1);
@@ -77,8 +84,38 @@ describe('operation comprehension', () => {
       },
     });
     expect(html.indexOf('implementation is unresolved')).toBeLessThan(
-      html.indexOf('Open source evidence'),
+      html.indexOf('aria-label="Source evidence"'),
     );
     expect(html).not.toContain('Enter this call');
   });
+});
+
+it('keeps a pinned binding visible while inspecting an operation without accesses', async () => {
+  const view = await sampleBackend.graph({ ...requestFor('get'), internals: ['get'] });
+  const selected = view.nodes.find((node) => node.id === 'fetch')!;
+  const html = await render({
+    selected: { ...selected, details: { ...selected.details!, accesses: [] } },
+    binding: {
+      id: 'local-record',
+      name: 'record',
+      kind: 'read',
+      expression: 'record',
+      source: selected.source,
+    },
+  });
+  expect(html).toContain('Inspecting binding: record');
+  expect(html).toContain('Dismiss binding investigation');
+});
+
+it('keeps loading and refresh recovery beside the source section', async () => {
+  const loading = await render({ sourceLoading: true });
+  expect(loading).toContain('Loading source');
+  expect(loading).toContain('aria-busy="true"');
+  const failed = await render({ sourceError: 'Source changed since analysis' });
+  const section = failed.slice(
+    failed.indexOf('aria-label="Source evidence"'),
+    failed.indexOf('Enter this call'),
+  );
+  expect(section).toContain('Source changed since analysis');
+  expect(section).toContain('Refresh and reopen source');
 });

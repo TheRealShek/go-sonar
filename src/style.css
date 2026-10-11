@@ -760,3 +760,54 @@ summary:focus-visible {
     grid-template-columns: 180px minmax(0, 1fr);
   }
 }
+
+.inspector[hidden] {
+  display: none;
+}
+.binding-investigation {
+  border: 1px solid #b9cfe6;
+  padding: 10px;
+  margin-bottom: 12px;
+  max-height: 24vh;
+  overflow: auto;
+}
+.source pre > .source-line {
+  display: block;
+  min-height: 1.7em;
+}
+.source pre .source-line > span {
+  display: inline;
+  min-height: 0;
+}
+.source pre {
+  position: relative;
+}
+.line-number {
+  color: #65778b;
+  user-select: none;
+}
+.syntax-keyword {
+  color: #7542a3;
+  font-weight: 600;
+}
+.syntax-string {
+  color: #116640;
+}
+.syntax-comment {
+  color: #627489;
+  font-style: italic;
+}
+.syntax-number {
+  color: #925306;
+}
+.keyboard-help {
+  font-size: 11px;
+  color: #627489;
+}
+.discovery-browser .matches {
+  max-height: 30vh;
+}
+
+.empty button {
+  pointer-events: auto;
+}

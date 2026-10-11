@@ -178,10 +178,11 @@ export function FlowNavigator({
             </strong>
             <span>Step {trail.steps.length}</span>
           </div>
-          <div className="actions">
+          <div className="actions" aria-label="Step destinations">
             <button
+              aria-keyshortcuts="["
               disabled={busy || trail.paused || trail.steps.length <= 1}
-              title={`Return to ${previousDestination}`}
+              title={`Return to ${previousDestination} ([)`}
               onClick={onBack}
             >
               Previous step

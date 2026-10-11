@@ -17,6 +17,8 @@ import { GraphLegend, edgeLabel, relationshipColors, selectionConnections } from
 import { symbolName, operationName, nodeName } from './identity';
 import { EvidenceInspector } from './EvidenceInspector';
 import { ConnectionSummary } from './ConnectionSummary';
+import { DiscoveryBrowser } from './DiscoveryBrowser';
+import { coverageLabel, isEditing, trapFocus } from './feedback';
 import {
   canEnterCall,
   boundRequest,
@@ -51,11 +53,10 @@ import type {
   ProjectSummary,
   SourceExcerpt,
   SourceSpan,
+  Access,
   SymbolFact,
   ViewNode,
   ViewEdge,
-  Discovery,
-  SymbolPage,
 } from './shared/protocol';
 import {
   LatestRequest,
@@ -117,7 +118,6 @@ export default function App() {
   const [root, setRoot] = useState('');
   const [project, setProject] = useState<ProjectSummary>();
 
-  const [query, setQuery] = useState('');
   const [matches, setMatches] = useState<SymbolFact[]>([]);
 
   const [request, setRequest] = useState<GraphRequest>();
@@ -131,12 +131,12 @@ export default function App() {
   const [hovered, setHovered] = useState<ViewNode | ViewEdge>();
   const [pinned, setPinned] = useState(false);
   const [evidence, setEvidence] = useState<SourceSpan>();
-  const [discovery, setDiscovery] = useState<Discovery>();
-  const [browserKind, setBrowserKind] = useState('');
-  const [browserPackage, setBrowserPackage] = useState('');
-  const [browserOffset, setBrowserOffset] = useState(0);
-  const [browserPage, setBrowserPage] = useState<SymbolPage>();
-  const [searching, setSearching] = useState(false);
+  const [sourceLoading, setSourceLoading] = useState(false);
+  const [sourceError, setSourceError] = useState('');
+  const [binding, setBinding] = useState<Access>();
+  const sourceOwner = useRef<{ id?: string; snapshot?: string } | undefined>(undefined);
+  const keepSourceOnReveal = useRef<{ id?: string; snapshot?: string } | undefined>(undefined);
+  const reopenSource = useRef<{ id: string; span: SourceSpan } | undefined>(undefined);
   const [recents, setRecents] = useState(recentPaths);
   const [wideSource, setWideSource] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -152,6 +152,7 @@ export default function App() {
   const [excerpt, setExcerpt] = useState<SourceExcerpt>();
 
   const [busy, setBusy] = useState(false);
+  const [busyTask, setBusyTask] = useState('Updating exploration');
   const [error, setError] = useState('');
   const [impact, setImpact] = useState('');
   const [navigationNotice, setNavigationNotice] = useState('');
@@ -172,7 +173,6 @@ export default function App() {
 
   const layout = useRef<LayoutClient | null>(null);
   const latest = useRef(new LatestRequest());
-  const searchLatest = useRef(new LatestRequest());
   const sourceLatest = useRef(new LatestRequest());
   const projectLatest = useRef(new LatestRequest());
   const benchmarking = useRef(false);
@@ -182,6 +182,13 @@ export default function App() {
   );
   const flow = useRef<ReactFlowInstance<SymbolNode> | null>(null);
   const canvas = useRef<HTMLDivElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const inspector = useRef<HTMLElement>(null);
+  const inspectorInvoker = useRef<HTMLElement | null>(null);
+  const identityInvoker = useRef<HTMLElement | null>(null);
+  const resetInvoker = useRef<HTMLElement | null>(null);
+  const suppressIdentityFocus = useRef(false);
+  const transientOrder = useRef({ sequence: 0, inspector: 0, identity: 0, reset: 0 });
   const framedFocus = useRef<string | undefined>(undefined);
   const restored = useRef<NavigationFrame | undefined>(undefined);
   const pendingSelection = useRef<string | undefined>(undefined);
@@ -196,81 +203,13 @@ export default function App() {
 
     return () => {
       latest.current.invalidate();
+      sourceLatest.current.invalidate();
+      projectLatest.current.invalidate();
       layout.current?.dispose();
       if (layoutAnimationTimer.current) clearTimeout(layoutAnimationTimer.current);
       window.__SONAR_METRICS__.ready = false;
     };
   }, []);
-
-  useEffect(() => {
-    const current = searchLatest.current.next();
-
-    if (!project || benchmarking.current) {
-      setMatches([]);
-      setSearching(false);
-      return;
-    }
-
-    setSearching(true);
-    const timer = setTimeout(
-      () =>
-        backend
-          .search(query)
-          .then((results) => {
-            if (current()) {
-              setMatches(results);
-              setSearching(false);
-            }
-          })
-          .catch((err) => {
-            if (current()) {
-              setError(String(err));
-              setSearching(false);
-            }
-          }),
-      180,
-    );
-
-    return () => clearTimeout(timer);
-  }, [query, project]);
-
-  useEffect(() => {
-    let active = true;
-    if (!project || benchmarking.current) {
-      setDiscovery(undefined);
-      return;
-    }
-    void backend
-      .discovery()
-      .then((value) => {
-        if (active) setDiscovery(value);
-      })
-      .catch((error) => {
-        if (active) setError(String(error));
-      });
-    return () => {
-      active = false;
-    };
-  }, [project]);
-
-  useEffect(() => {
-    let active = true;
-    if (!project || benchmarking.current) {
-      setBrowserPage(undefined);
-      return;
-    }
-    void backend
-      .browse(browserKind, browserPackage, browserOffset)
-      .then((page) => {
-        if (active) setBrowserPage(page);
-      })
-      .catch((error) => {
-        if (active) setError(String(error));
-      });
-    return () => {
-      active = false;
-    };
-  }, [project, browserKind, browserPackage, browserOffset]);
 
   const capture = (): NavigationFrame | undefined =>
     request && project
@@ -346,15 +285,22 @@ export default function App() {
     navigate(requestFor(id, nextKind, preferences.current[categoryFor(nextKind)]));
   };
 
-  const loadProject = async (refresh = false) => {
+  const loadProject = async (refresh = false, path = root) => {
     const current = projectLatest.current.next();
     const previousFrame = capture();
     latest.current.invalidate();
-    searchLatest.current.invalidate();
     sourceLatest.current.invalidate();
 
     setBusy(true);
+    setBusyTask('Analyzing project');
+    setRoot(path);
     setError('');
+    sourceOwner.current = undefined;
+    keepSourceOnReveal.current = undefined;
+    if (!refresh) setBinding(undefined);
+    setEvidence(undefined);
+    setSourceError('');
+    setSourceLoading(false);
     setExcerpt(undefined);
     setSelected(undefined);
     setHovered(undefined);
@@ -373,10 +319,11 @@ export default function App() {
     setEdges([]);
 
     try {
-      const summary = await (refresh ? backend.refresh() : backend.open(root));
+      const summary = await (refresh ? backend.refresh() : backend.open(path));
       if (!current()) return;
 
       setProject(summary);
+      if (!refresh || summary.snapshot !== project?.snapshot) setBinding(undefined);
       if (isDesktop) {
         const next = [summary.root, ...recents.filter((path) => path !== summary.root)].slice(0, 8);
         setRecents(next);
@@ -419,14 +366,12 @@ export default function App() {
         framedFocus.current = undefined;
         restored.current = undefined;
         pendingFlow.current = undefined;
-        setBrowserPackage('');
-        setBrowserKind('');
-        setBrowserOffset(0);
         setRequest(undefined);
       }
     } catch (err) {
       if (current()) {
         setProject(undefined);
+        setBinding(undefined);
         setRequest(undefined);
         setError(String(err));
       }
@@ -512,6 +457,20 @@ export default function App() {
         ...result.nodes.filter((node) => node.parentId),
       ];
 
+      const preserveRevealSource = (item?: ViewNode | ViewEdge) => {
+        const keep = keepSourceOnReveal.current;
+        const owner = sourceOwner.current;
+        if (
+          item &&
+          keep &&
+          keep.snapshot === result.snapshot &&
+          owner &&
+          owner.id === keep.id &&
+          owner.snapshot === keep.snapshot
+        ) {
+          sourceOwner.current = { ...owner, id: item.id };
+        }
+      };
       const commitStarted = performance.now();
       flushSync(() => {
         setNodes(
@@ -585,10 +544,11 @@ export default function App() {
           result.nodes.find((node) => node.id === result.focus)?.kind ?? 'function';
         setSelected((previous) => {
           const id = selectedId ?? (initialNavigation ? result.focus : previous?.id);
-          return (
+          const item =
             result.nodes.find((node) => node.id === id) ??
-            result.edges.find((edge) => edge.id === id)
-          );
+            result.edges.find((edge) => edge.id === id);
+          preserveRevealSource(item);
+          return item;
         });
         if (pendingFlow.current) {
           const pending = pendingFlow.current;
@@ -611,16 +571,16 @@ export default function App() {
                   }
                 : { functionId: pending.functionId, steps: [{ nodeId: id }] },
             );
-            setSelected(result.nodes.find((node) => node.id === id));
+            const item = result.nodes.find((node) => node.id === id);
+            preserveRevealSource(item);
+            setSelected(item);
             centerId = id;
           }
           pendingFlow.current = undefined;
         }
         pendingSelection.current = undefined;
-        sourceLatest.current.invalidate();
-        setEvidence(undefined);
-        setExcerpt(undefined);
       });
+      keepSourceOnReveal.current = undefined;
       const commitMs = performance.now() - commitStarted;
 
       // Position memory is bounded independently of the source index.
@@ -698,6 +658,13 @@ export default function App() {
     const current = latest.current.next();
     const started = performance.now();
     setBusy(true);
+    setBusyTask(
+      pendingLayoutAnchor.current || keepSourceOnReveal.current
+        ? 'Revealing region'
+        : impact
+          ? 'Tracing impact'
+          : 'Updating exploration',
+    );
     setError('');
     window.__SONAR_METRICS__.requests++;
 
@@ -712,7 +679,10 @@ export default function App() {
         return paintView(result, current, started);
       })
       .catch((err) => {
-        if (current()) setError(String(err));
+        if (current()) {
+          keepSourceOnReveal.current = undefined;
+          setError(String(err));
+        }
       })
       .finally(() => {
         if (current()) setBusy(false);
@@ -726,7 +696,6 @@ export default function App() {
     begin: (config) => {
       setBusy(true);
       setRoot(config.root);
-      setQuery(config.query);
     },
     opened: (summary) => {
       positions.current.clear();
@@ -749,25 +718,68 @@ export default function App() {
     ? view?.summaries.find((summary) => summary.nodeId === selectedNode.id)
     : undefined;
 
-  const inspect = async (span: SourceSpan) => {
-    const current = sourceLatest.current.next();
-    setExcerpt(undefined);
-    setEvidence(span);
-    try {
-      const result = await backend.source(span);
-      if (current()) setExcerpt(result);
-    } catch (err) {
-      if (current()) setError(String(err));
-    }
-  };
+  const inspect = useCallback(
+    async (span: SourceSpan) => {
+      const current = sourceLatest.current.next();
+      sourceOwner.current = {
+        id: selectedRef.current?.id,
+        snapshot: project?.snapshot,
+      };
+      setEvidence(span);
+      setExcerpt(undefined);
+      setSourceError('');
+      if (
+        !span.file ||
+        span.line <= 0 ||
+        (project?.root && !span.file.startsWith(`${project.root.replace(/\/$/, '')}/`))
+      ) {
+        setSourceLoading(false);
+        return;
+      }
+      setSourceLoading(true);
+      try {
+        const result = await backend.source(span);
+        if (current()) setExcerpt(result);
+      } catch (err) {
+        if (current()) setSourceError(String(err));
+      } finally {
+        if (current()) setSourceLoading(false);
+      }
+    },
+    [project?.root, project?.snapshot],
+  );
+
+  useEffect(() => {
+    if (
+      !inspectorOpen ||
+      !selected ||
+      !project ||
+      view?.snapshot !== project.snapshot ||
+      benchmarking.current
+    )
+      return;
+    if (
+      sourceOwner.current?.id === selected.id &&
+      sourceOwner.current.snapshot === project.snapshot
+    )
+      return;
+    const pending = reopenSource.current;
+    reopenSource.current = undefined;
+    const span =
+      pending?.id === selected.id
+        ? pending.span
+        : 'name' in selected
+          ? selected.source
+          : selected.evidence;
+    void inspect(span);
+  }, [selected?.id, project?.snapshot, view?.snapshot, inspectorOpen, inspect]);
 
   const select = (value: ViewNode | ViewEdge) => {
-    sourceLatest.current.invalidate();
+    selectedRef.current = value;
     setSelected(value);
-    setEvidence(undefined);
     setPinned(true);
+    transientOrder.current.identity = ++transientOrder.current.sequence;
     setHovered(undefined);
-    setExcerpt(undefined);
   };
 
   const change = (updates: Partial<GraphRequest>, preserveTrail = false) => {
@@ -823,6 +835,23 @@ export default function App() {
       void flow.current.setViewport(next, { duration: 0 });
   };
 
+  const inspectOccurrence = (node: ViewNode, span: SourceSpan) => {
+    select(node);
+    void inspect(span);
+    if (view?.nodes.some((visible) => visible.id === node.id)) {
+      showNode(node, false);
+      return;
+    }
+    if (node.parentId && request && !busy) {
+      change({
+        focus: node.parentId,
+        internals: [...new Set([...request.internals.slice(-15), node.parentId])],
+        behaviorAnchors: { ...request.behaviorAnchors, [node.parentId]: node.id },
+      });
+      pendingSelection.current = node.id;
+    }
+  };
+
   const openBehavior = (id: string) => {
     if (!request || busy) return;
     setOverviewFunctionId(id);
@@ -868,6 +897,7 @@ export default function App() {
 
   const reveal = (node: ViewNode) => {
     if (!request || busy) return;
+    keepSourceOnReveal.current = { id: selectedRef.current?.id, snapshot: view?.snapshot };
     const at = positions.current.get(node.id);
     if (at && node.details?.region)
       pendingLayoutAnchor.current = { id: node.details.region.firstNodeId, position: at };
@@ -948,33 +978,147 @@ export default function App() {
 
   const peek = (value?: ViewNode | ViewEdge) => {
     if (hoverTimer.current) clearTimeout(hoverTimer.current);
-    if (value) setHovered(value);
-    else hoverTimer.current = setTimeout(() => setHovered(undefined), 180);
+    if (value) {
+      if (hovered?.id !== value.id)
+        transientOrder.current.identity = ++transientOrder.current.sequence;
+      setHovered(value);
+    } else hoverTimer.current = setTimeout(() => setHovered(undefined), 180);
   };
 
-  const keyboardIdentity = (event: React.FocusEvent<HTMLDivElement>) => {
-    const id = (event.target as HTMLElement).closest('[data-id]')?.getAttribute('data-id');
-    const value =
-      view?.nodes.find((node) => node.id === id) ?? view?.edges.find((edge) => edge.id === id);
-    if (value) peek(value);
+  const restoreFocus = (element: HTMLElement | null) => {
+    suppressIdentityFocus.current = true;
+    (element?.isConnected ? element : canvas.current)?.focus();
+    suppressIdentityFocus.current = false;
+  };
+
+  const dismissIdentity = () => {
+    if (hoverTimer.current) clearTimeout(hoverTimer.current);
+    setHovered(undefined);
+    setPinned(false);
+    restoreFocus(identityInvoker.current);
+  };
+
+  const openInspector = () => {
+    if (!inspectorOpen) {
+      const active = document.activeElement as HTMLElement | null;
+      inspectorInvoker.current = active?.closest('.identity-card')
+        ? identityInvoker.current
+        : active;
+    }
+    transientOrder.current.inspector = ++transientOrder.current.sequence;
+    if (inspectorOpen) inspector.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    setHovered(undefined);
+    setPinned(false);
+    setInspectorOpen(true);
+  };
+
+  const closeInspector = () => {
+    setInspectorOpen(false);
+    restoreFocus(inspectorInvoker.current);
   };
 
   useEffect(() => {
-    const dismiss = (event: KeyboardEvent) => {
+    if (inspectorOpen) inspector.current?.querySelector<HTMLButtonElement>('button')?.focus();
+  }, [inspectorOpen]);
+
+  const keyboardIdentity = (event: React.FocusEvent<HTMLDivElement>) => {
+    if (suppressIdentityFocus.current) return;
+    const target = (event.target as HTMLElement).closest<HTMLElement>('[data-id]');
+    const id = target?.getAttribute('data-id');
+    const value =
+      view?.nodes.find((node) => node.id === id) ?? view?.edges.find((edge) => edge.id === id);
+    if (value) {
+      identityInvoker.current = target ?? null;
+      peek(value);
+    }
+  };
+
+  const previousStep = () => {
+    if (!trail || trail.paused || busy || trail.steps.length < 2) return;
+    setContinuationCallId(undefined);
+    const steps = trail.steps.slice(0, -1);
+    setTrail({ ...trail, steps });
+    const id = steps.at(-1)?.nodeId;
+    const node = view?.nodes.find((node) => node.id === id);
+    if (node) {
+      select(node);
+      showNode(node, keepStepCentered);
+    } else if (id && request) {
+      pendingFlow.current = { functionId: trail.functionId, nodeId: id };
+      change({ behaviorAnchors: { ...request.behaviorAnchors, [trail.functionId]: id } });
+    }
+  };
+
+  const nextStep = () => {
+    if (!view || !trail || trail.paused || busy) return;
+    const node = view.nodes.find((node) => node.id === trail.steps.at(-1)?.nodeId);
+    if (!node) return;
+    if (['region', 'boundary'].includes(node.kind)) {
+      reveal(node);
+      return;
+    }
+    const choices = successors(view, node.id);
+    if (choices.length === 1) step(choices[0]);
+    else if (choices.length > 1) {
+      setNavigationNotice('Choose a destination to continue this branch.');
+      document
+        .querySelector<HTMLButtonElement>(
+          '.flow-navigation [aria-label="Step destinations"] button:not(:disabled):nth-child(2)',
+        )
+        ?.focus();
+    }
+  };
+
+  useEffect(() => {
+    const handle = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       if (event.key === 'Escape') {
-        setHovered(undefined);
-        setPinned(false);
-        setSelected(undefined);
-        setExcerpt(undefined);
-        sourceLatest.current.invalidate();
+        const layers = [
+          { name: 'reset', visible: resetPreview, order: transientOrder.current.reset },
+          {
+            name: 'identity',
+            visible: !!hovered || (pinned && !!selected),
+            order: transientOrder.current.identity,
+          },
+          { name: 'inspector', visible: inspectorOpen, order: transientOrder.current.inspector },
+        ]
+          .filter((layer) => layer.visible)
+          .sort((left, right) => right.order - left.order);
+        const top = layers[0]?.name;
+        if (top === 'reset') {
+          setResetPreview(false);
+          restoreFocus(resetInvoker.current);
+        } else if (top === 'identity') dismissIdentity();
+        else if (top === 'inspector') closeInspector();
+        else return;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        searchInput.current?.focus();
+        searchInput.current?.select();
+        return;
+      }
+      if (isEditing(event.target) || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.key === '/') {
+        event.preventDefault();
+        searchInput.current?.focus();
+      } else if (event.key.toLowerCase() === 'i' && selected) {
+        event.preventDefault();
+        openInspector();
+      } else if (event.key === '[') {
+        event.preventDefault();
+        previousStep();
+      } else if (event.key === ']') {
+        event.preventDefault();
+        nextStep();
       }
     };
-    window.addEventListener('keydown', dismiss);
-    return () => {
-      window.removeEventListener('keydown', dismiss);
-      if (hoverTimer.current) clearTimeout(hoverTimer.current);
-    };
-  }, []);
+    window.addEventListener('keydown', handle);
+    return () => window.removeEventListener('keydown', handle);
+  });
 
   const onNodesChange = (changes: NodeChange<SymbolNode>[]) => {
     setNodes((current) => applyNodeChanges(changes, current));
@@ -1029,7 +1173,7 @@ export default function App() {
   };
 
   const statusLabel = busy
-    ? 'Analyzing / laying out…'
+    ? `${busyTask}…`
     : view
       ? `${view.nodes.length} nodes · ${view.edges.length} edges${view.truncated ? ' · view limit reached' : ''}`
       : 'Choose a project, then a symbol';
@@ -1067,19 +1211,22 @@ export default function App() {
             onClick={() => {
               void chooseProjectFolder()
                 .then((path) => {
-                  if (path) setRoot(path);
+                  if (path) void loadProject(false, path);
                 })
                 .catch((error) => setError(String(error)));
             }}
           >
-            Choose folder
+            Open folder
           </button>
         )}
         {isDesktop && !!recents.length && (
           <select
             aria-label="Recent projects"
             value=""
-            onChange={(event) => setRoot(event.target.value)}
+            disabled={busy}
+            onChange={(event) => {
+              if (event.target.value) void loadProject(false, event.target.value);
+            }}
           >
             <option value="">Recent projects</option>
             {recents.map((path) => (
@@ -1095,6 +1242,9 @@ export default function App() {
       </header>
       <div className="workspace">
         <aside className="explorer">
+          <p className="keyboard-help">
+            Shortcuts: Ctrl/Cmd+K or / search · I inspect · [ previous step · ] next step
+          </p>
           <h2>{project?.name ?? 'Start an exploration'}</h2>
           {project && (
             <>
@@ -1110,136 +1260,13 @@ export default function App() {
               </p>
             </>
           )}
-          <label>
-            Find any symbol
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Name, struct, field, method…"
-              disabled={!project}
-            />
-          </label>
-          <div className="matches">
-            {matches.map((symbol) => (
-              <button
-                className="match"
-                key={symbol.id}
-                onClick={() => focusSymbol(symbol.id, symbol.kind)}
-              >
-                <strong>{symbolName(symbol)}</strong>
-                <small>
-                  {symbol.kind} · {symbol.packageId}
-                </small>
-              </button>
-            ))}
-          </div>
-          {searching && <p role="status">Searching symbols…</p>}
-          {project && !searching && !matches.length && (
-            <p className="muted">No matching symbols in the covered analysis.</p>
-          )}
-          {project && !request && (
-            <section className="first-exploration">
-              <h3>Choose a starting point</h3>
-              {discovery?.entrypoints.map((symbol) => (
-                <button
-                  className="match"
-                  key={symbol.id}
-                  onClick={() => focusSymbol(symbol.id, symbol.kind)}
-                >
-                  <strong>Executable entry: {symbol.name}</strong>
-                  <small>{symbol.packageId}</small>
-                </button>
-              ))}
-              <p className="muted">
-                {discovery?.entrypoints.length
-                  ? 'Start at an entry or browse any declaration below.'
-                  : 'Library module. Browse packages, types, or functions below.'}
-              </p>
-            </section>
-          )}
-          {project && (
-            <details>
-              <summary>Browse packages and declarations</summary>
-              <label>
-                Package
-                <input
-                  list="project-packages"
-                  value={browserPackage}
-                  onChange={(event) => {
-                    setBrowserPackage(event.target.value);
-                    setBrowserOffset(0);
-                  }}
-                  placeholder="All packages"
-                />
-                <datalist id="project-packages">
-                  {discovery?.packages.map((pkg) => (
-                    <option value={pkg} key={pkg} />
-                  ))}
-                </datalist>
-              </label>
-              {discovery && discovery.packageCount > discovery.packages.length && (
-                <p className="muted">
-                  {discovery.packageCount} packages. Enter a package path to browse one outside
-                  these suggestions.
-                </p>
-              )}
-              <label>
-                Declaration kind
-                <select
-                  value={browserKind}
-                  onChange={(event) => {
-                    setBrowserKind(event.target.value);
-                    setBrowserOffset(0);
-                  }}
-                >
-                  <option value="">All kinds</option>
-                  {[
-                    'function',
-                    'method',
-                    'struct',
-                    'interface',
-                    'type',
-                    'field',
-                    'variable',
-                    'constant',
-                  ].map((kind) => (
-                    <option key={kind} value={kind}>
-                      {kind}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {browserPage?.symbols.map((symbol) => (
-                <button
-                  key={symbol.id}
-                  className="match"
-                  onClick={() => focusSymbol(symbol.id, symbol.kind)}
-                >
-                  {symbolName(symbol)}
-                  <small>
-                    {symbol.kind} · {symbol.packageId}
-                  </small>
-                </button>
-              ))}
-              <p>{browserPage?.total ?? 0} declarations</p>
-              <div className="actions">
-                <button
-                  disabled={!browserOffset}
-                  onClick={() => setBrowserOffset(Math.max(0, browserOffset - 40))}
-                >
-                  Previous declarations
-                </button>
-                <button
-                  disabled={
-                    !browserPage || browserOffset + browserPage.symbols.length >= browserPage.total
-                  }
-                  onClick={() => setBrowserOffset(browserOffset + 40)}
-                >
-                  More declarations
-                </button>
-              </div>
-            </details>
-          )}
+          <DiscoveryBrowser
+            key={project ? `${project.root}:${project.snapshot}` : 'empty'}
+            enabled={!!project && !benchmarking.current}
+            inputRef={searchInput}
+            onFocus={focusSymbol}
+            onResults={setMatches}
+          />
           <h3>Explore a question</h3>
           <div className="questions" aria-label="Exploration questions">
             {QUESTIONS[focusCategory].map((question) => (
@@ -1389,7 +1416,11 @@ export default function App() {
               aria-expanded={resetPreview}
               aria-controls="reset-preview"
               title="Review what will close before resetting this exploration"
-              onClick={() => setResetPreview(!resetPreview)}
+              onClick={(event) => {
+                resetInvoker.current = event.currentTarget;
+                if (!resetPreview) transientOrder.current.reset = ++transientOrder.current.sequence;
+                setResetPreview(!resetPreview);
+              }}
             >
               Reset to focus
             </button>
@@ -1397,7 +1428,9 @@ export default function App() {
               disabled={!selected}
               aria-expanded={inspectorOpen}
               aria-controls="evidence-inspector"
-              onClick={() => setInspectorOpen(true)}
+              onClick={openInspector}
+              aria-keyshortcuts="i"
+              title="Inspect selected item (I)"
             >
               Inspect
             </button>
@@ -1434,7 +1467,14 @@ export default function App() {
                 >
                   Apply reset
                 </button>
-                <button onClick={() => setResetPreview(false)}>Keep exploration</button>
+                <button
+                  onClick={() => {
+                    setResetPreview(false);
+                    restoreFocus(resetInvoker.current);
+                  }}
+                >
+                  Keep exploration
+                </button>
               </div>
             </div>
           )}
@@ -1505,7 +1545,10 @@ export default function App() {
           )}
           {error && (
             <div role="alert" className="error">
-              {error}
+              <p>{error}</p>
+              <button disabled={busy} onClick={() => void loadProject(!!project)}>
+                Retry {project ? 'analysis' : 'opening project'}
+              </button>
             </div>
           )}
           {impact && (
@@ -1539,21 +1582,7 @@ export default function App() {
             }
             onStart={startFlow}
             onStep={step}
-            onBack={() => {
-              if (!trail || trail.paused || busy) return;
-              setContinuationCallId(undefined);
-              const steps = trail.steps.slice(0, -1);
-              setTrail({ ...trail, steps });
-              const id = steps.at(-1)?.nodeId;
-              const node = view?.nodes.find((node) => node.id === id);
-              if (node) {
-                select(node);
-                showNode(node, keepStepCentered);
-              } else if (id && request) {
-                pendingFlow.current = { functionId: trail.functionId, nodeId: id };
-                change({ behaviorAnchors: { ...request.behaviorAnchors, [trail.functionId]: id } });
-              }
-            }}
+            onBack={previousStep}
             onReveal={reveal}
             onOutcome={compareOutcome}
             onOutcomePage={(id, offset) =>
@@ -1571,6 +1600,7 @@ export default function App() {
           <div
             className={`canvas ${animateLayout ? 'layout-changing' : ''}`}
             ref={canvas}
+            tabIndex={-1}
             onFocusCapture={keyboardIdentity}
             onKeyDownCapture={(event) => {
               if (
@@ -1606,12 +1636,18 @@ export default function App() {
                 flow.current = instance;
               }}
               onNodesChange={onNodesChange}
-              onNodeClick={(_, node) => {
+              onNodeClick={(event, node) => {
+                identityInvoker.current = (event.target as HTMLElement).closest<HTMLElement>(
+                  '[data-id]',
+                );
                 const fact = view?.nodes.find((value) => value.id === node.id);
 
                 if (fact) select(fact);
               }}
-              onEdgeClick={(_, edge) => {
+              onEdgeClick={(event, edge) => {
+                identityInvoker.current = (event.target as HTMLElement).closest<HTMLElement>(
+                  '[data-id]',
+                );
                 const fact = view?.edges.find((value) => value.id === edge.id);
 
                 if (fact) select(fact);
@@ -1629,14 +1665,14 @@ export default function App() {
 
                 if (fact) {
                   select(fact);
-                  setInspectorOpen(true);
+                  openInspector();
                 }
               }}
               onEdgeDoubleClick={(_, edge) => {
                 const fact = view?.edges.find((value) => value.id === edge.id);
                 if (fact) {
                   select(fact);
-                  setInspectorOpen(true);
+                  openInspector();
                 }
               }}
               zoomOnDoubleClick={false}
@@ -1674,13 +1710,10 @@ export default function App() {
                     const value = hovered ?? selected;
                     if (value) {
                       select(value);
-                      setInspectorOpen(true);
+                      openInspector();
                     }
                   }}
-                  onDismiss={() => {
-                    setHovered(undefined);
-                    setPinned(false);
-                  }}
+                  onDismiss={dismissIdentity}
                 />
               </div>
             )}
@@ -1688,15 +1721,37 @@ export default function App() {
               <div className="empty">
                 Explore calls, data relationships, and static function behavior.
                 <br />
-                {!isDesktop
-                  ? 'Open the labelled sample to preview the workspace.'
-                  : 'Open a local Go module to analyze its source.'}
+                {project ? (
+                  <>
+                    <p>
+                      Choose a declaration in Find any symbol. Packages and types are starting
+                      points for libraries.
+                    </p>
+                    <button onClick={() => searchInput.current?.focus()}>
+                      Find a starting point
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => {
+                      if (isDesktop)
+                        void chooseProjectFolder()
+                          .then((path) => {
+                            if (path) void loadProject(false, path);
+                          })
+                          .catch((error) => setError(String(error)));
+                      else void loadProject();
+                    }}
+                  >
+                    {isDesktop ? 'Open folder' : 'Open sample'}
+                  </button>
+                )}
               </div>
             )}
           </div>
           {project?.diagnostics.length ? (
             <details className="diagnostics">
-              <summary>Analysis coverage: {project.diagnostics.length} diagnostic(s)</summary>
+              <summary>{coverageLabel(project.diagnostics)}</summary>
               {project.diagnostics.map((diagnostic, index) => (
                 <p key={index}>
                   {diagnostic.severity}: {diagnostic.message}{' '}
@@ -1706,56 +1761,76 @@ export default function App() {
             </details>
           ) : project ? (
             <p className="coverage">
-              No analyzer diagnostics. Static evidence does not establish runtime execution or full
-              dynamic target coverage.
+              Analysis completed without package errors. Static evidence cannot establish runtime
+              execution or resolve every dynamic target.
             </p>
           ) : null}
         </main>
-        {inspectorOpen && (
-          <aside className="inspector" id="evidence-inspector" aria-label="Evidence inspector">
-            <button onClick={() => setInspectorOpen(false)}>Close inspector</button>
-            <button className="source-width" onClick={() => setWideSource(!wideSource)}>
-              {wideSource ? 'Compact source panel' : 'Widen source panel'}
-            </button>
-            <EvidenceInspector
-              selected={selected}
-              summary={selectedSummary}
-              view={view}
-              request={request}
-              root={project?.root}
-              busy={busy}
-              impact={impact}
-              excerpt={excerpt}
-              evidence={evidence}
-              callDepth={calls.length}
-              onFocus={focusSymbol}
-              onUsage={(id) => focusSymbol(id, 'field')}
-              onChange={change}
-              onEnter={enterCall}
-              onFollow={openBehavior}
-              onGroup={(nodeId, group) => {
-                if (request) navigate(revealGroup(request, nodeId, group));
-              }}
-              onClearGroup={(nodeId) => {
-                if (request) navigate(clearGroup(request, nodeId));
-              }}
-              onReveal={reveal}
-              onSelect={select}
-              onSource={(span) => void inspect(span)}
-              onImpact={(id, category) => {
-                if (request) {
-                  navigate({ ...request, focus: id });
-                  setImpact(category);
-                }
-              }}
-              onPage={(direction) => {
-                if (request && selectedNode && selectedSummary)
-                  navigate(neighborPage(request, selectedNode.id, selectedSummary, direction));
-              }}
-              onShow={(node) => showNode(node)}
-            />
-          </aside>
-        )}
+        <aside
+          ref={inspector}
+          hidden={!inspectorOpen}
+          onKeyDown={(event) => {
+            if (window.matchMedia('(max-width: 750px)').matches) trapFocus(event);
+          }}
+          className="inspector"
+          id="evidence-inspector"
+          aria-label="Evidence inspector"
+        >
+          <button onClick={closeInspector}>Close inspector</button>
+          <button className="source-width" onClick={() => setWideSource(!wideSource)}>
+            {wideSource ? 'Compact source panel' : 'Widen source panel'}
+          </button>
+          <EvidenceInspector
+            selected={selected}
+            summary={selectedSummary}
+            view={view}
+            request={request}
+            root={project?.root}
+            busy={busy}
+            impact={impact}
+            excerpt={excerpt}
+            evidence={evidence}
+            sourceLoading={sourceLoading}
+            sourceError={sourceError}
+            onRetrySource={() => {
+              if (evidence) void inspect(evidence);
+            }}
+            onRefreshSource={() => {
+              if (evidence && selected) reopenSource.current = { id: selected.id, span: evidence };
+              void loadProject(true);
+            }}
+            binding={binding}
+            onBinding={setBinding}
+            onOccurrence={inspectOccurrence}
+            onDismissBinding={() => setBinding(undefined)}
+            callDepth={calls.length}
+            onFocus={focusSymbol}
+            onUsage={(id) => focusSymbol(id, 'field')}
+            onChange={change}
+            onEnter={enterCall}
+            onFollow={openBehavior}
+            onGroup={(nodeId, group) => {
+              if (request) navigate(revealGroup(request, nodeId, group));
+            }}
+            onClearGroup={(nodeId) => {
+              if (request) navigate(clearGroup(request, nodeId));
+            }}
+            onReveal={reveal}
+            onSelect={select}
+            onSource={(span) => void inspect(span)}
+            onImpact={(id, category) => {
+              if (request) {
+                navigate({ ...request, focus: id });
+                setImpact(category);
+              }
+            }}
+            onPage={(direction) => {
+              if (request && selectedNode && selectedSummary)
+                navigate(neighborPage(request, selectedNode.id, selectedSummary, direction));
+            }}
+            onShow={(node) => showNode(node)}
+          />
+        </aside>
       </div>
     </div>
   );

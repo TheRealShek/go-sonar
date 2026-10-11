@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { backend } from './backend';
+import { SourcePanel } from './SourcePanel';
+import { sourceKey } from './source';
 import { formatSource } from './GraphCards';
 import { symbolName, nodeName } from './identity';
 import type {
@@ -26,6 +28,14 @@ export function EvidenceInspector({
   impact,
   excerpt,
   evidence,
+  sourceLoading,
+  sourceError,
+  onRetrySource,
+  onRefreshSource,
+  binding,
+  onBinding,
+  onDismissBinding,
+  onOccurrence,
   callDepth,
   onFocus,
   onUsage,
@@ -50,6 +60,14 @@ export function EvidenceInspector({
   impact: string;
   excerpt?: SourceExcerpt;
   evidence?: SourceSpan;
+  sourceLoading: boolean;
+  sourceError: string;
+  onRetrySource: () => void;
+  onRefreshSource: () => void;
+  binding?: Access;
+  onBinding: (access: Access) => void;
+  onDismissBinding: () => void;
+  onOccurrence: (node: ViewNode, span: SourceSpan) => void;
   callDepth: number;
   onFocus: (id: string, kind?: string) => void;
   onUsage: (id: string) => void;
@@ -69,12 +87,10 @@ export function EvidenceInspector({
   const [siteOffset, setSiteOffset] = useState(0);
   const [siteError, setSiteError] = useState('');
   const [sitesBusy, setSitesBusy] = useState(false);
-  const [binding, setBinding] = useState<Access>();
   const edge = selected && 'evidence' in selected ? selected : undefined;
   const node = selected && 'name' in selected ? selected : undefined;
   useEffect(() => {
     setSiteOffset(0);
-    setBinding(undefined);
   }, [selected?.id, view?.snapshot]);
   useEffect(() => {
     let active = true;
@@ -116,13 +132,32 @@ export function EvidenceInspector({
       ? view?.edges.filter((edge) => edge.target === node.id && edge.kind === 'calls')
       : [];
   const call = node?.details?.call;
-  const localSites = binding
-    ? (view?.nodes.flatMap((candidate) =>
-        (candidate.details?.accesses ?? [])
-          .filter((access) => access.id === binding.id)
-          .map((access) => ({ node: candidate, access })),
-      ) ?? [])
-    : [];
+  const [knownSites, setKnownSites] = useState<{
+    snapshot?: string;
+    sites: { node: ViewNode; access: Access }[];
+  }>({ sites: [] });
+  useEffect(() => {
+    if (!binding) {
+      setKnownSites({ sites: [] });
+      return;
+    }
+    if (!view) return;
+    setKnownSites((previous) => {
+      const sites = new Map<string, { node: ViewNode; access: Access }>();
+      const candidates = view.nodes.flatMap((node) =>
+        (node.details?.accesses ?? []).map((access) => ({ node, access })),
+      );
+      for (const site of [
+        ...(previous.snapshot === view.snapshot ? previous.sites : []),
+        ...candidates,
+      ]) {
+        if (site.access.id === binding.id)
+          sites.set(`${site.node.id}:${site.access.kind}:${sourceKey(site.access.source)}`, site);
+      }
+      return { snapshot: view.snapshot, sites: [...sites.values()] };
+    });
+  }, [binding?.id, view?.snapshot, view?.nodes]);
+  const localSites = knownSites.sites.filter((site) => site.access.id === binding?.id);
   const sourceContent = (
     <>
       {source && <p className="source-location">{formatSource(source)}</p>}
@@ -142,59 +177,120 @@ export function EvidenceInspector({
           ))}
         </>
       )}
-      {excerpt && (
-        <div className="source">
-          <small>
-            {excerpt.file} · from line {excerpt.firstLine}
-          </small>
-          <pre>
-            {excerpt.text.split('\n').map((line, index) => (
-              <span
-                className={
-                  evidence &&
-                  excerpt.firstLine + index >= evidence.line &&
-                  excerpt.firstLine + index <= evidence.endLine
-                    ? 'source-highlight'
-                    : ''
-                }
-                key={index}
-              >
-                {String(excerpt.firstLine + index).padStart(4)} {line}
-              </span>
-            ))}
-          </pre>
-        </div>
-      )}
     </>
   );
   return (
     <>
       <h2>Context & evidence</h2>
+      {!!view?.nodes.length && (
+        <details className="keyboard-browser">
+          <summary>Inspect the graph with the keyboard</summary>
+          <label>
+            Visible operation or symbol
+            <select
+              value={node?.id ?? ''}
+              onChange={(event) => {
+                const node = view.nodes.find((node) => node.id === event.target.value);
+                if (node) onSelect(node);
+              }}
+            >
+              <option value="">Choose a node</option>
+              {view.nodes.map((node) => (
+                <option key={node.id} value={node.id}>
+                  {node.kind} · {symbolName(node)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Visible connection
+            <select
+              value={edge?.id ?? ''}
+              onChange={(event) => {
+                const edge = view.edges.find((edge) => edge.id === event.target.value);
+                if (edge) onSelect(edge);
+              }}
+            >
+              <option value="">Choose a connection</option>
+              {view.edges.map((edge) => (
+                <option key={edge.id} value={edge.id}>
+                  {nodeName(view.nodes, edge.source)} → {nodeName(view.nodes, edge.target)} ·{' '}
+                  {edge.label || edge.kind}
+                </option>
+              ))}
+            </select>
+          </label>
+        </details>
+      )}
       {selected && (
         <>
           <small>{selected.kind}</small>
           <h3>{node ? symbolName(node) : edge?.label}</h3>
+        </>
+      )}
+      {node?.details && (
+        <p className="operation-explanation">
+          {node.details.explanation ||
+            'No operation explanation is available. Inspect the source evidence.'}
+        </p>
+      )}
+      {node?.details?.limitation && (
+        <p className="notice operation-limitation">{node.details.limitation}</p>
+      )}
+      {call && call.dispatch !== 'direct' && (
+        <p className="notice operation-limitation">
+          {call.dispatch === 'interface' ? 'Interface contract' : 'Dynamic callable'} established.
+          The implementation is unresolved; entering a compatible implementation would guess the
+          target.
+        </p>
+      )}
+      <SourcePanel
+        evidence={evidence}
+        selectedSource={source}
+        onSelectedSource={() => {
+          if (source) onSource(source);
+        }}
+        excerpt={excerpt}
+        loading={sourceLoading}
+        error={sourceError}
+        onRetry={onRetrySource}
+        onRefresh={onRefreshSource}
+      />
+      {selected && !localSource && sourceContent}
+      {binding && (
+        <section className="binding-investigation" aria-label="Pinned binding investigation">
+          <h3>Inspecting binding: {binding.name}</h3>
+          <button onClick={onDismissBinding}>Dismiss binding investigation</button>
+          <p className="muted">
+            Known sites from revealed regions. Declaration identity separates shadowed variables;
+            hidden regions and aliases may contain other uses.
+          </p>
+          {localSites.map(({ node, access }, index) => (
+            <button
+              className="match"
+              key={`${node.id}:${index}`}
+              onClick={() => {
+                onOccurrence(node, access.source);
+              }}
+            >
+              {access.kind} · {access.expression} · line {access.source.line}
+              {!view?.nodes.some((visible) => visible.id === node.id) && ' · reveal occurrence'}
+            </button>
+          ))}
+          {!localSites.length && (
+            <p>
+              No occurrences in this view. Return to the binding's function or reveal more regions.
+            </p>
+          )}
+        </section>
+      )}
+
+      {selected && (
+        <>
           {node ? (
             <>
-              {node.details && (
-                <p className="operation-explanation">
-                  {node.details.explanation ||
-                    'No operation explanation is available. Inspect the source evidence.'}
-                </p>
-              )}
-              {node.details?.limitation && (
-                <p className="notice operation-limitation">{node.details.limitation}</p>
-              )}
-              {call && call.dispatch !== 'direct' && (
-                <p className="notice operation-limitation">
-                  {call.dispatch === 'interface' ? 'Interface contract' : 'Dynamic callable'}{' '}
-                  established. The implementation is unresolved; entering a compatible
-                  implementation would guess the target.
-                </p>
-              )}
               <code>{node.details?.expression || node.signature}</code>
               <p className="source-location">{node.packageId}</p>
-              {node.details && sourceContent}
               {!node.details && !node.documentation && (
                 <p>No documented purpose supplied. Design intent is unknown.</p>
               )}
@@ -319,7 +415,7 @@ export function EvidenceInspector({
                       </span>
                       <button
                         onClick={() =>
-                          access.symbolId ? onUsage(access.symbolId) : setBinding(access)
+                          access.symbolId ? onUsage(access.symbolId) : onBinding(access)
                         }
                       >
                         {access.symbolId
@@ -328,20 +424,6 @@ export function EvidenceInspector({
                       </button>
                     </div>
                   ))}
-                  {binding && (
-                    <>
-                      <p>
-                        Binding {binding.name}. Declaration identity keeps shadowed variables
-                        separate. These are sites in the visible region; hidden regions and aliases
-                        may contain other uses.
-                      </p>
-                      {localSites.map(({ node, access }, index) => (
-                        <button className="match" key={index} onClick={() => onSelect(node)}>
-                          {access.kind} · {access.expression} · line {access.source.line}
-                        </button>
-                      ))}
-                    </>
-                  )}
                 </details>
               )}
               {!node.parentId && summary && (
@@ -490,54 +572,13 @@ export function EvidenceInspector({
               </>
             )
           )}
-          {!node?.details && sourceContent}
         </>
       )}
       {!selected && (
         <p className="muted">
           Hover or focus a node or edge for source identity. Click or press Enter to pin details.
-          Escape dismisses details.
+          Escape closes the inspector and preserves your selection.
         </p>
-      )}
-      {!!view?.nodes.length && (
-        <details className="keyboard-browser">
-          <summary>Inspect the graph with the keyboard</summary>
-          <label>
-            Visible operation or symbol
-            <select
-              value={node?.id ?? ''}
-              onChange={(event) => {
-                const node = view.nodes.find((node) => node.id === event.target.value);
-                if (node) onSelect(node);
-              }}
-            >
-              <option value="">Choose a node</option>
-              {view.nodes.map((node) => (
-                <option key={node.id} value={node.id}>
-                  {node.kind} · {symbolName(node)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Visible connection
-            <select
-              value={edge?.id ?? ''}
-              onChange={(event) => {
-                const edge = view.edges.find((edge) => edge.id === event.target.value);
-                if (edge) onSelect(edge);
-              }}
-            >
-              <option value="">Choose a connection</option>
-              {view.edges.map((edge) => (
-                <option key={edge.id} value={edge.id}>
-                  {nodeName(view.nodes, edge.source)} → {nodeName(view.nodes, edge.target)} ·{' '}
-                  {edge.label || edge.kind}
-                </option>
-              ))}
-            </select>
-          </label>
-        </details>
       )}
     </>
   );

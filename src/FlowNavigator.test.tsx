@@ -75,7 +75,7 @@ describe('walkthrough controls', () => {
     expect(html).toContain('Resume walkthrough');
     expect(html).not.toContain('Pause walkthrough');
     expect(html).toMatch(
-      /<button disabled="" title="Return to Input: key · line 7">Previous step<\/button>/,
+      /<button[^>]*disabled="" title="Return to Input: key · line 7 \(\[\)">Previous step<\/button>/,
     );
     expect(html).toContain('<button disabled="">ok</button>');
   });
