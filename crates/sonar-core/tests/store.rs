@@ -560,3 +560,155 @@ fn long_behavior_projection_is_bounded_with_and_without_a_distant_anchor() {
         }
     }
 }
+
+#[test]
+fn local_groups_override_only_the_selected_seed_in_both_directions() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let mut facts = package(
+        root,
+        "p",
+        &["a", "b", "c", "d", "e"],
+        &[("a", "b"), ("a", "c"), ("b", "d"), ("e", "b")],
+    );
+    facts.edges[2].kind = "reads".into();
+    facts.edges[3].kind = "reads".into();
+    let mut store = GraphStore::memory(root).unwrap();
+    store.apply(&batch(root, vec![facts], true)).unwrap();
+    for (direction, target) in [("outgoing", "d"), ("incoming", "e")] {
+        let mut query = request("a", &["b"], 80, Direction::Outgoing);
+        query.neighbor_limit = 1;
+        query.groups.insert(
+            "b".into(),
+            sonar_core::NeighborFilter {
+                package_id: "p".into(),
+                kind: "reads".into(),
+                direction: direction.into(),
+            },
+        );
+        let view = store.graph(&query).unwrap();
+        valid_endpoints(&view);
+        assert_eq!(query.kinds, vec!["calls"]);
+        assert!(matches!(query.direction, Direction::Outgoing));
+        assert!(
+            view.edges
+                .iter()
+                .any(|edge| edge.source == "a" && edge.target == "b" && edge.kind == "calls")
+        );
+        assert!(view.nodes.iter().any(|node| node.id == target));
+        let summary = view.summaries.iter().find(|s| s.node_id == "b").unwrap();
+        assert_eq!(
+            summary.hidden,
+            summary.filtered + summary.collapsed + summary.paginated + summary.limited
+        );
+        assert!(
+            summary
+                .groups
+                .iter()
+                .any(|group| group.direction == direction
+                    && group.kind == "reads"
+                    && !group.filtered)
+        );
+        query.groups.clear();
+        assert!(
+            !store
+                .graph(&query)
+                .unwrap()
+                .nodes
+                .iter()
+                .any(|node| node.id == target)
+        );
+    }
+}
+
+#[test]
+fn methods_question_filters_before_paging_and_counts_other_type_uses() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let mut facts = package(
+        root,
+        "p",
+        &["T", "function", "method1", "method2"],
+        &[("function", "T"), ("method1", "T"), ("method2", "T")],
+    );
+    facts.symbols[0].kind = "struct".into();
+    facts.symbols[2].kind = "method".into();
+    facts.symbols[3].kind = "method".into();
+    for edge in &mut facts.edges {
+        edge.kind = "uses_type".into();
+    }
+    let mut store = GraphStore::memory(root).unwrap();
+    store.apply(&batch(root, vec![facts], true)).unwrap();
+    let mut query = request("T", &[], 80, Direction::Incoming);
+    query.kinds = vec!["uses_type".into()];
+    query.neighbor_kind = "method".into();
+    query.neighbor_limit = 1;
+    for offset in [0, 1] {
+        query.offsets.insert("T".into(), offset);
+        let view = store.graph(&query).unwrap();
+        assert_eq!(view.edges.len(), 1);
+        assert_eq!(
+            view.nodes
+                .iter()
+                .filter(|node| node.kind == "method")
+                .count(),
+            1
+        );
+        assert!(!view.nodes.iter().any(|node| node.id == "function"));
+        let summary = view.summaries.iter().find(|s| s.node_id == "T").unwrap();
+        assert_eq!(summary.filtered, 1);
+        assert_eq!(summary.paginated, 1);
+        assert_eq!(summary.hidden, 2);
+    }
+    query.neighbor_kind = "unknown".into();
+    assert!(store.graph(&query).is_err());
+}
+
+#[test]
+fn combined_discovery_counts_and_pages_after_all_filters() {
+    let dir = tempfile::tempdir().unwrap();
+    let names: Vec<String> = (0..85).map(|i| format!("Get{i:03}")).collect();
+    let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    let mut facts = package(dir.path(), "p", &refs, &[]);
+    for symbol in &mut facts.symbols {
+        symbol.kind = "method".into();
+        symbol.qualified_name = format!("p::Cache.{}", symbol.name);
+    }
+    let mut store = GraphStore::memory(dir.path()).unwrap();
+    store
+        .apply(&batch(
+            dir.path(),
+            vec![
+                facts,
+                package(dir.path(), "q", &["GetOther", "literal_%"], &[]),
+            ],
+            true,
+        ))
+        .unwrap();
+    let first = store.find_symbols("Cache.Get", "method", "p", 0).unwrap();
+    let second = store.find_symbols("Cache.Get", "method", "p", 40).unwrap();
+    let last = store.find_symbols("Cache.Get", "method", "p", 80).unwrap();
+    assert_eq!(first.total, 85);
+    assert_eq!(first.symbols.len(), 40);
+    assert_eq!(last.symbols.len(), 5);
+    assert_eq!(second.offset, 40);
+    let ids: HashSet<_> = first
+        .symbols
+        .iter()
+        .chain(&second.symbols)
+        .chain(&last.symbols)
+        .map(|symbol| &symbol.id)
+        .collect();
+    assert_eq!(ids.len(), 85);
+    assert_eq!(
+        store.find_symbols("Get", "function", "q", 0).unwrap().total,
+        1
+    );
+    assert_eq!(store.find_symbols("_%", "", "", 0).unwrap().total, 1);
+    assert_eq!(
+        store.find_symbols("Get", "method", "q", 0).unwrap().total,
+        0
+    );
+    assert!(store.find_symbols(&"x".repeat(513), "", "", 0).is_err());
+    assert!(store.find_symbols("", "", "", 1_000_001).is_err());
+}

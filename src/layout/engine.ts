@@ -40,7 +40,7 @@ export async function calculateLayout(
       'elk.spacing.edgeEdge': '16',
       'elk.spacing.edgeNode': '20',
       'elk.layered.spacing.edgeEdgeBetweenLayers': '16',
-      // Limit sibling rows so fan-out uses horizontal space instead of a tall column.
+      // Spread call fan-out across horizontal layers.
       'elk.layered.layering.strategy': 'COFFMAN_GRAHAM',
       'elk.layered.layering.coffmanGraham.layerBound': '3',
       'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
@@ -83,8 +83,66 @@ export async function calculateLayout(
   };
   walk(output.children ?? []);
 
-  // ELK routes and nodes must use the same coordinates. Reusing individual old
-  // positions would make paths cross nodes that moved after routing.
+  const routedPositions = structuredClone(positions);
+  const routedSizes = structuredClone(sizes);
+
+  // Place known landmarks first, with the selected node and its parent taking priority.
+  // New nodes move around those landmarks. Grow groups to contain retained child positions.
+  const byId = new Map(request.nodes.map((node) => [node.id, node]));
+  const anchors = new Set<string>();
+  let anchor = request.anchorId ? byId.get(request.anchorId) : undefined;
+  while (anchor && !anchors.has(anchor.id)) {
+    anchors.add(anchor.id);
+    anchor = anchor.parentId ? byId.get(anchor.parentId) : undefined;
+  }
+  const siblings = new Map<string | undefined, typeof request.nodes>();
+  for (const node of request.nodes) {
+    const group = siblings.get(node.parentId) ?? [];
+    group.push(node);
+    siblings.set(node.parentId, group);
+  }
+  const place = (parentId?: string) => {
+    const group = [...(siblings.get(parentId) ?? [])];
+    for (const node of group) if (siblings.has(node.id)) place(node.id);
+    group.sort(
+      (a, b) =>
+        Number(anchors.has(b.id)) - Number(anchors.has(a.id)) ||
+        Number(!!b.position) - Number(!!a.position),
+    );
+    const placed: string[] = [];
+    for (const node of group) {
+      const candidate = { ...(node.position ?? positions[node.id]) };
+      const size = sizes[node.id];
+      if (parentId) {
+        candidate.x = Math.max(node.position ? 0 : 30, candidate.x);
+        candidate.y = Math.max(node.position ? 0 : 110, candidate.y);
+      }
+      // Every move passes a colliding sibling, so this loop is bounded by the placed nodes.
+      for (let attempt = 0; attempt < placed.length; attempt++) {
+        const collision = placed.find((id) => {
+          const at = positions[id];
+          const other = sizes[id];
+          return (
+            candidate.x < at.x + other.width + 12 &&
+            candidate.x + size.width + 12 > at.x &&
+            candidate.y < at.y + other.height + 12 &&
+            candidate.y + size.height + 12 > at.y
+          );
+        });
+        if (!collision) break;
+        if (parentId) candidate.y = positions[collision].y + sizes[collision].height + 45;
+        else candidate.x = positions[collision].x + sizes[collision].width + 80;
+      }
+      positions[node.id] = candidate;
+      placed.push(node.id);
+      if (parentId) {
+        sizes[parentId].width = Math.max(sizes[parentId].width, candidate.x + size.width + 30);
+        sizes[parentId].height = Math.max(sizes[parentId].height, candidate.y + size.height + 30);
+      }
+    }
+  };
+  place();
+
   const routes: LayoutResult['routes'] = {};
   const offsets = new Map<string, Point>([['root', { x: 0, y: 0 }]]);
   const locate = (node: ElkNode, parent: Point) => {
@@ -116,5 +174,12 @@ export async function calculateLayout(
   };
   collect(output);
 
-  return { positions, sizes, routes };
+  const changedGeometry = request.nodes.some(
+    ({ id }) =>
+      positions[id].x !== routedPositions[id].x ||
+      positions[id].y !== routedPositions[id].y ||
+      sizes[id].width !== routedSizes[id].width ||
+      sizes[id].height !== routedSizes[id].height,
+  );
+  return { positions, sizes, routes: changedGeometry ? {} : routes };
 }

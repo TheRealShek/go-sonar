@@ -12,9 +12,22 @@ import {
 } from '@xyflow/react';
 import { backend, isDesktop, chooseProjectFolder } from './backend';
 import { nodeTypes, IdentityCard, type SymbolNode } from './GraphCards';
-import { edgeTypes, connectionColor } from './GraphEdges';
-import { FlowNavigator } from './FlowNavigator';
+import { FlowNavigator, BranchHistory } from './FlowNavigator';
+import {
+  GraphLegend,
+  edgeLabel,
+  connectionColor,
+  edgeTypes,
+  selectionConnections,
+  graphEmphasis,
+} from './GraphEdges';
+import { evidenceTarget } from './source';
+import { symbolName, operationName, nodeName } from './identity';
 import { EvidenceInspector } from './EvidenceInspector';
+import { ConnectionSummary } from './ConnectionSummary';
+import { DiscoveryBrowser } from './DiscoveryBrowser';
+import { coverageLabel, isEditing, trapFocus } from './feedback';
+import type { BindingOccurrence } from './binding';
 import {
   canEnterCall,
   boundRequest,
@@ -27,7 +40,13 @@ import {
   outcomePaths,
   revealRegion,
   focusViewport,
+  operationViewport,
   MAX_CALL_DEPTH,
+  explorationDestination,
+  explorationBreadcrumbs,
+  collapseBranch,
+  resetToFocus,
+  replacedOperations,
   type NavigationFrame,
   type CallFrame,
   type FlowTrail,
@@ -43,11 +62,12 @@ import type {
   ProjectSummary,
   SourceExcerpt,
   SourceSpan,
+  Access,
   SymbolFact,
   ViewNode,
   ViewEdge,
-  Discovery,
-  SymbolPage,
+  EvidenceTarget,
+  EvidenceResolution,
 } from './shared/protocol';
 import {
   LatestRequest,
@@ -57,6 +77,12 @@ import {
   validateView,
   VIEW_LIMIT,
   neighborPage,
+  categoryFor,
+  QUESTIONS,
+  revealGroup,
+  clearGroup,
+  type ExplorationCategory,
+  type ExplorationPreferences,
 } from './exploration';
 import { LayoutClient } from './layout/client';
 import type { LayoutResult } from './layout/contract';
@@ -103,28 +129,38 @@ export default function App() {
   const [root, setRoot] = useState('');
   const [project, setProject] = useState<ProjectSummary>();
 
-  const [query, setQuery] = useState('');
   const [matches, setMatches] = useState<SymbolFact[]>([]);
 
   const [request, setRequest] = useState<GraphRequest>();
   const [history, setHistory] = useState<NavigationFrame[]>([]);
   const [future, setFuture] = useState<NavigationFrame[]>([]);
   const [trail, setTrail] = useState<FlowTrail>();
+  const [overviewFunctionId, setOverviewFunctionId] = useState<string>();
   const [calls, setCalls] = useState<CallFrame[]>([]);
   const [outcomeId, setOutcomeId] = useState<string>();
   const [continuationCallId, setContinuationCallId] = useState<string>();
   const [hovered, setHovered] = useState<ViewNode | ViewEdge>();
+  const [pinned, setPinned] = useState(false);
   const [evidence, setEvidence] = useState<SourceSpan>();
-  const [discovery, setDiscovery] = useState<Discovery>();
-  const [browserKind, setBrowserKind] = useState('');
-  const [browserPackage, setBrowserPackage] = useState('');
-  const [browserOffset, setBrowserOffset] = useState(0);
-  const [browserPage, setBrowserPage] = useState<SymbolPage>();
-  const [searching, setSearching] = useState(false);
+  const [sourceLoading, setSourceLoading] = useState(false);
+  const [sourceError, setSourceError] = useState('');
+  const [binding, setBinding] = useState<Access>();
+  const sourceOwner = useRef<{ id?: string; snapshot?: string } | undefined>(undefined);
+  const keepSourceOnReveal = useRef<{ id?: string; snapshot?: string } | undefined>(undefined);
+  const sourceTarget = useRef<EvidenceTarget | undefined>(undefined);
+  const reopenSource = useRef<EvidenceResolution | undefined>(undefined);
+  const sourceRecoveryBlocked = useRef(false);
   const [recents, setRecents] = useState(recentPaths);
-  const [wideSource, setWideSource] = useState(false);
   const [explorerOpen, setExplorerOpen] = useState(true);
+  const [projectMenuOpen, setProjectMenuOpen] = useState(true);
+  const projectMenu = useRef<HTMLDetailsElement>(null);
+  const explorerInvoker = useRef<HTMLElement | null>(null);
+  const explorerToggle = useRef<HTMLButtonElement>(null);
+  const [wideSource, setWideSource] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [keepStepCentered, setKeepStepCentered] = useState(false);
+  const keepStepCenteredRef = useRef(false);
+  keepStepCenteredRef.current = keepStepCentered;
 
   const [view, setView] = useState<GraphView>();
   const [nodes, setNodes] = useState<SymbolNode[]>([]);
@@ -134,13 +170,27 @@ export default function App() {
   const [excerpt, setExcerpt] = useState<SourceExcerpt>();
 
   const [busy, setBusy] = useState(false);
+  const [busyTask, setBusyTask] = useState('Updating exploration');
   const [error, setError] = useState('');
   const [impact, setImpact] = useState('');
   const [navigationNotice, setNavigationNotice] = useState('');
+  const [resetPreview, setResetPreview] = useState(false);
+  const [animateLayout, setAnimateLayout] = useState(false);
+  const layoutAnimationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const pendingLayoutAnchor = useRef<
+    | {
+        id: string;
+        position: { x: number; y: number; width: number; height: number; parentId?: string };
+      }
+    | undefined
+  >(undefined);
 
   const layout = useRef<LayoutClient | null>(null);
   const latest = useRef(new LatestRequest());
-  const searchLatest = useRef(new LatestRequest());
   const sourceLatest = useRef(new LatestRequest());
   const projectLatest = useRef(new LatestRequest());
   const benchmarking = useRef(false);
@@ -150,13 +200,26 @@ export default function App() {
   );
   const flow = useRef<ReactFlowInstance<SymbolNode> | null>(null);
   const canvas = useRef<HTMLDivElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const inspector = useRef<HTMLElement>(null);
+  const inspectorInvoker = useRef<HTMLElement | null>(null);
+  const identityInvoker = useRef<HTMLElement | null>(null);
+  const resetInvoker = useRef<HTMLElement | null>(null);
+  const suppressIdentityFocus = useRef(false);
+  const transientOrder = useRef({
+    sequence: 0,
+    inspector: 0,
+    identity: 0,
+    reset: 0,
+    project: 0,
+    explorer: 0,
+  });
   const framedFocus = useRef<string | undefined>(undefined);
   const restored = useRef<NavigationFrame | undefined>(undefined);
   const pendingSelection = useRef<string | undefined>(undefined);
   const pendingFlow = useRef<{ functionId: string; nodeId?: string } | undefined>(undefined);
-  const preferences = useRef<
-    Pick<GraphRequest, 'kinds' | 'direction' | 'neighborLimit'> | undefined
-  >(undefined);
+  const preferences = useRef<Partial<Record<ExplorationCategory, ExplorationPreferences>>>({});
+  const focusKind = useRef('function');
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
@@ -165,80 +228,13 @@ export default function App() {
 
     return () => {
       latest.current.invalidate();
+      sourceLatest.current.invalidate();
+      projectLatest.current.invalidate();
       layout.current?.dispose();
+      if (layoutAnimationTimer.current) clearTimeout(layoutAnimationTimer.current);
       window.__SONAR_METRICS__.ready = false;
     };
   }, []);
-
-  useEffect(() => {
-    const current = searchLatest.current.next();
-
-    if (!project || benchmarking.current) {
-      setMatches([]);
-      setSearching(false);
-      return;
-    }
-
-    setSearching(true);
-    const timer = setTimeout(
-      () =>
-        backend
-          .search(query)
-          .then((results) => {
-            if (current()) {
-              setMatches(results);
-              setSearching(false);
-            }
-          })
-          .catch((err) => {
-            if (current()) {
-              setError(String(err));
-              setSearching(false);
-            }
-          }),
-      180,
-    );
-
-    return () => clearTimeout(timer);
-  }, [query, project]);
-
-  useEffect(() => {
-    let active = true;
-    if (!project || benchmarking.current) {
-      setDiscovery(undefined);
-      return;
-    }
-    void backend
-      .discovery()
-      .then((value) => {
-        if (active) setDiscovery(value);
-      })
-      .catch((error) => {
-        if (active) setError(String(error));
-      });
-    return () => {
-      active = false;
-    };
-  }, [project]);
-
-  useEffect(() => {
-    let active = true;
-    if (!project || benchmarking.current) {
-      setBrowserPage(undefined);
-      return;
-    }
-    void backend
-      .browse(browserKind, browserPackage, browserOffset)
-      .then((page) => {
-        if (active) setBrowserPage(page);
-      })
-      .catch((error) => {
-        if (active) setError(String(error));
-      });
-    return () => {
-      active = false;
-    };
-  }, [project, browserKind, browserPackage, browserOffset]);
 
   const capture = (): NavigationFrame | undefined =>
     request && project
@@ -246,8 +242,11 @@ export default function App() {
           snapshot: project.snapshot,
           request,
           selectedId: selected?.id,
+          focusLabel: nodeName(view?.nodes, request.focus, request.focus),
+          focusLine: view?.nodes.find((node) => node.id === request.focus)?.source.line,
           viewport: flow.current?.getViewport(),
           trail,
+          overviewFunctionId,
           outcomeId,
           calls,
           continuationCallId,
@@ -264,11 +263,16 @@ export default function App() {
       setFuture([]);
     }
     if (next.focus !== request?.focus) {
+      pendingLayoutAnchor.current = undefined;
+      setOverviewFunctionId(undefined);
       setTrail(undefined);
       setOutcomeId(undefined);
       pendingSelection.current = next.focus;
+      setPinned(false);
     }
     setContinuationCallId(undefined);
+    setResetPreview(false);
+    setNavigationNotice('');
     setImpact('');
     setRequest(boundRequest(next));
   };
@@ -280,15 +284,19 @@ export default function App() {
       );
       return;
     }
+    pendingLayoutAnchor.current = undefined;
     restored.current = frame;
     for (const [id, position] of Object.entries(frame.positions ?? {}))
       positions.current.set(id, position);
+    focusKind.current =
+      view?.nodes.find((node) => node.id === frame.request.focus)?.kind ?? focusKind.current;
     setTrail(frame.trail);
     setOutcomeId(frame.outcomeId);
     setCalls(frame.calls ?? []);
     setContinuationCallId(frame.continuationCallId);
     pendingSelection.current = frame.selectedId;
     navigate(frame.request, false);
+    setOverviewFunctionId(frame.overviewFunctionId);
     setTrail(frame.trail);
     setOutcomeId(frame.outcomeId);
     setContinuationCallId(frame.continuationCallId);
@@ -297,23 +305,38 @@ export default function App() {
   const focusSymbol = (id: string, kind?: string) => {
     const fact =
       view?.nodes.find((node) => node.id === id) ?? matches.find((node) => node.id === id);
-    navigate(requestFor(id, kind ?? fact?.kind, preferences.current));
+    const nextKind = kind ?? fact?.kind ?? 'function';
+    focusKind.current = nextKind;
+    navigate(requestFor(id, nextKind, preferences.current[categoryFor(nextKind)]));
   };
 
-  const loadProject = async (refresh = false) => {
+  const loadProject = async (refresh = false, path = root, recoverSource = false) => {
     const current = projectLatest.current.next();
+    const target = recoverSource ? sourceTarget.current : undefined;
+    sourceRecoveryBlocked.current = recoverSource;
+    reopenSource.current = undefined;
     const previousFrame = capture();
     latest.current.invalidate();
-    searchLatest.current.invalidate();
     sourceLatest.current.invalidate();
 
     setBusy(true);
+    setBusyTask('Analyzing project');
+    setRoot(path);
     setError('');
+    sourceOwner.current = undefined;
+    keepSourceOnReveal.current = undefined;
+    if (!refresh) setBinding(undefined);
+    setEvidence(undefined);
+    setSourceError('');
+    setSourceLoading(false);
     setExcerpt(undefined);
     setSelected(undefined);
     setHovered(undefined);
+    setPinned(false);
     setNavigationNotice('');
     restored.current = undefined;
+    pendingLayoutAnchor.current = undefined;
+    setResetPreview(false);
     pendingFlow.current = undefined;
     pendingSelection.current = undefined;
     if (hoverTimer.current) clearTimeout(hoverTimer.current);
@@ -324,11 +347,34 @@ export default function App() {
     setEdges([]);
 
     try {
-      const summary = await (refresh ? backend.refresh() : backend.open(root));
+      const summary = await (refresh ? backend.refresh() : backend.open(path));
       if (!current()) return;
 
+      if (recoverSource) {
+        setSourceLoading(true);
+        try {
+          const resolution = target
+            ? await backend.resolveSource(target, summary.snapshot)
+            : {
+                snapshot: summary.snapshot,
+                problem:
+                  'Select the current occurrence in the graph to reopen source. This collapsed region cannot be identified after an edit.',
+              };
+          if (!current()) return;
+          reopenSource.current = resolution.item && resolution.source ? resolution : undefined;
+          setSourceError(resolution.problem ?? '');
+        } catch (error) {
+          if (!current()) return;
+          setSourceError(
+            `Could not restore this occurrence: ${String(error)}. Select its current occurrence in the graph to reopen source.`,
+          );
+        } finally {
+          if (current()) setSourceLoading(false);
+        }
+      }
       setProject(summary);
-      setInspectorOpen(false);
+      setProjectMenuOpen(false);
+      if (!refresh || summary.snapshot !== project?.snapshot) setBinding(undefined);
       if (isDesktop) {
         const next = [summary.root, ...recents.filter((path) => path !== summary.root)].slice(0, 8);
         setRecents(next);
@@ -344,7 +390,23 @@ export default function App() {
           project?.snapshot,
           summary.snapshot,
         );
-        setRequest({ ...navigation.request! });
+        let nextRequest = { ...navigation.request! };
+        const recovery = reopenSource.current;
+        if (recovery?.item) {
+          const item = recovery.item;
+          const functionId = target?.kind === 'operation' ? target.functionId : undefined;
+          const operationId = 'name' in item ? item.id : item.source;
+          nextRequest = functionId
+            ? {
+                ...nextRequest,
+                focus: functionId,
+                internals: [...new Set([...nextRequest.internals, functionId])],
+                behaviorAnchors: { ...nextRequest.behaviorAnchors, [functionId]: operationId },
+              }
+            : { ...nextRequest, focus: 'name' in item ? item.id : item.source };
+          pendingSelection.current = item.id;
+        }
+        setRequest(nextRequest);
         setHistory(navigation.history);
         setFuture(navigation.future);
         setTrail(navigation.trail);
@@ -352,31 +414,35 @@ export default function App() {
         setOutcomeId(navigation.outcomeId);
         setContinuationCallId(navigation.continuationCallId);
         if (summary.snapshot !== project?.snapshot) {
+          setOverviewFunctionId(undefined);
           positions.current.clear();
           framedFocus.current = undefined;
           setNavigationNotice(
             'Analysis changed. Saved paths, call frames, and history were cleared. Start following from the current symbol.',
           );
-        } else if (previousFrame) restored.current = previousFrame;
+        } else if (previousFrame)
+          restored.current = {
+            ...previousFrame,
+            selectedId: reopenSource.current?.item?.id ?? previousFrame.selectedId,
+          };
       } else {
         positions.current.clear();
         setHistory([]);
         setFuture([]);
         setCalls([]);
         setTrail(undefined);
+        setOverviewFunctionId(undefined);
         setContinuationCallId(undefined);
         setOutcomeId(undefined);
         framedFocus.current = undefined;
         restored.current = undefined;
         pendingFlow.current = undefined;
-        setBrowserPackage('');
-        setBrowserKind('');
-        setBrowserOffset(0);
         setRequest(undefined);
       }
     } catch (err) {
       if (current()) {
         setProject(undefined);
+        setBinding(undefined);
         setRequest(undefined);
         setError(String(err));
       }
@@ -398,10 +464,17 @@ export default function App() {
         result.nodes.filter((node) => node.parentId).map((node) => node.parentId),
       );
 
+      const previousView = viewRef.current;
+      const anchor = pendingLayoutAnchor.current;
       const layoutStarted = performance.now();
       const geometry: LayoutResult = await layout.current!.layout({
+        anchorId:
+          anchor?.id ??
+          (result.nodes.some((node) => node.id === selectedRef.current?.id)
+            ? selectedRef.current?.id
+            : result.focus),
         nodes: result.nodes.map((node) => {
-          const old = positions.current.get(node.id);
+          const old = anchor?.id === node.id ? anchor.position : positions.current.get(node.id);
           const sameGroup = old?.parentId === node.parentId;
 
           return {
@@ -409,7 +482,7 @@ export default function App() {
             parentId: node.parentId,
             role: node.details?.role,
             width: grouped.has(node.id) ? 650 : 220,
-            height: grouped.has(node.id) ? 450 : 88,
+            height: grouped.has(node.id) ? 450 : node.parentId ? 136 : 112,
             position: sameGroup && old ? { x: old.x, y: old.y } : undefined,
           };
         }),
@@ -424,29 +497,26 @@ export default function App() {
       });
       const layoutMs = performance.now() - layoutStarted;
       if (!current()) return;
-      const oldFocus = positions.current.get(result.focus);
-      const focusPosition = geometry.positions[result.focus];
-      if (oldFocus && framedFocus.current === result.focus) {
-        const dx = oldFocus.x - focusPosition.x;
-        const dy = oldFocus.y - focusPosition.y;
-        for (const node of result.nodes.filter((node) => !node.parentId)) {
-          geometry.positions[node.id].x += dx;
-          geometry.positions[node.id].y += dy;
-        }
-        for (const route of Object.values(geometry.routes)) {
-          for (const section of route.sections)
-            for (const point of section) {
-              point.x += dx;
-              point.y += dy;
-            }
-          if (route.label) {
-            route.label.x += dx;
-            route.label.y += dy;
-          }
-        }
-      }
+      pendingLayoutAnchor.current = undefined;
       const selectedId = restored.current?.selectedId ?? pendingSelection.current;
       const initialNavigation = framedFocus.current !== result.focus;
+      const newlyRevealed = new Set(
+        !initialNavigation && !restored.current
+          ? result.nodes
+              .filter((node) => !previousView?.nodes.some((old) => old.id === node.id))
+              .map((node) => node.id)
+          : [],
+      );
+      const replaced = replacedOperations(previousView, result);
+      if (!restored.current && replaced.count)
+        setNavigationNotice(
+          `${replaced.count} previously visible operations in ${replaced.functions.join(', ')} were collapsed or moved outside this view to stay within the view budget. Previous exploration restores them.`,
+        );
+      if (layoutAnimationTimer.current) clearTimeout(layoutAnimationTimer.current);
+      setAnimateLayout(
+        !initialNavigation && !restored.current && mode === 'frames' && !benchmarking.current,
+      );
+      layoutAnimationTimer.current = setTimeout(() => setAnimateLayout(false), 220);
 
       let centerId: string | undefined =
         pendingSelection.current &&
@@ -458,6 +528,20 @@ export default function App() {
         ...result.nodes.filter((node) => node.parentId),
       ];
 
+      const preserveRevealSource = (item?: ViewNode | ViewEdge) => {
+        const keep = keepSourceOnReveal.current;
+        const owner = sourceOwner.current;
+        if (
+          item &&
+          keep &&
+          keep.snapshot === result.snapshot &&
+          owner &&
+          owner.id === keep.id &&
+          owner.snapshot === keep.snapshot
+        ) {
+          sourceOwner.current = { ...owner, id: item.id };
+        }
+      };
       const commitStarted = performance.now();
       flushSync(() => {
         setNodes(
@@ -466,16 +550,14 @@ export default function App() {
             const position = geometry.positions[node.id];
             positions.current.set(node.id, { ...position, ...size, parentId: node.parentId });
             const summary = result.summaries.find((item) => item.nodeId === node.id);
-            const summaryText = summary?.hidden
-              ? `${summary.hidden} hidden`
-              : node.parentId
-                ? ''
-                : node.packageId;
+            const summaryText = summary
+              ? `${summary.distinctSymbols ?? 0} symbols · ${summary.sourceSites ?? summary.incoming + summary.outgoing} source sites${summary.hidden ? ` · ${summary.hidden} hidden` : ''}`
+              : '';
 
             return {
               id: node.id,
               type: 'symbol',
-              ariaLabel: `${node.kind}: ${node.name}`,
+              ariaLabel: `${node.kind}: ${operationName(node)} · ${node.packageId}${newlyRevealed.has(node.id) ? ' · newly revealed' : ''}`,
               parentId: node.parentId,
               extent: node.parentId ? ('parent' as const) : undefined,
               position,
@@ -483,7 +565,9 @@ export default function App() {
               height: size.height,
               style: size,
               data: {
-                label: node.name,
+                label: operationName(node),
+                packageId: node.packageId,
+                newlyRevealed: newlyRevealed.has(node.id),
                 kind: node.kind,
                 grouped: grouped.has(node.id),
                 focused: node.id === result.focus,
@@ -501,10 +585,8 @@ export default function App() {
             id: edge.id,
             source: edge.source,
             target: edge.target,
-            label: edge.loopBack
-              ? `${edge.label || 'continue'} · loop back`
-              : edge.label || edge.kind,
-            ariaLabel: `${result.nodes.find((node) => node.id === edge.source)?.name} to ${result.nodes.find((node) => node.id === edge.target)?.name}: ${edge.label || edge.kind}`,
+            label: edgeLabel(edge),
+            ariaLabel: `${nodeName(result.nodes, edge.source)} to ${nodeName(result.nodes, edge.target)}: ${edgeLabel(edge)}`,
             type: 'routed',
             data: { route: geometry.routes[edge.id], curved: grouped.size === 0 },
             className: edge.kind === 'control' ? 'control-edge' : 'dependency-edge',
@@ -524,7 +606,7 @@ export default function App() {
             style: {
               stroke: connectionColor(edge.id, edge.kind, edge.label),
               strokeWidth: 2,
-              strokeDasharray: edge.certainty === 'possible' || edge.loopBack ? '6 4' : undefined,
+              strokeDasharray: edge.certainty === 'possible' ? '6 4' : undefined,
             },
             labelStyle: { fontSize: 11, fill: 'var(--foreground)' },
             labelBgStyle: { fill: 'var(--panel)' },
@@ -533,15 +615,33 @@ export default function App() {
         );
 
         setView(result);
+        focusKind.current =
+          result.nodes.find((node) => node.id === result.focus)?.kind ?? 'function';
         setSelected((previous) => {
           const id = selectedId ?? (initialNavigation ? result.focus : previous?.id);
-          return (
+          let item =
             result.nodes.find((node) => node.id === id) ??
-            result.edges.find((edge) => edge.id === id)
-          );
+            result.edges.find((edge) => edge.id === id);
+          const recovery = reopenSource.current;
+          if (recovery?.snapshot === result.snapshot && recovery.item) {
+            const recovered = recovery.item;
+            item =
+              'name' in recovered
+                ? (result.nodes.find((node) => node.id === recovered.id) ?? recovered)
+                : (result.edges.find(
+                    (edge) =>
+                      edge.source === recovered.source &&
+                      edge.target === recovered.target &&
+                      edge.kind === recovered.kind &&
+                      (edge.kind !== 'control' || edge.label === recovered.label),
+                  ) ?? recovered);
+          }
+          preserveRevealSource(item);
+          return item;
         });
         if (pendingFlow.current) {
           const pending = pendingFlow.current;
+          setOverviewFunctionId(pending.functionId);
           const id =
             pending.nodeId ??
             result.behaviors?.find((b) => b.symbolId === pending.functionId)?.entryId ??
@@ -560,14 +660,16 @@ export default function App() {
                   }
                 : { functionId: pending.functionId, steps: [{ nodeId: id }] },
             );
-            setSelected(result.nodes.find((node) => node.id === id));
+            const item = result.nodes.find((node) => node.id === id);
+            preserveRevealSource(item);
+            setSelected(item);
             centerId = id;
           }
           pendingFlow.current = undefined;
         }
         pendingSelection.current = undefined;
-        setExcerpt(undefined);
       });
+      keepSourceOnReveal.current = undefined;
       const commitMs = performance.now() - commitStarted;
 
       // Position memory is bounded independently of the source index.
@@ -594,11 +696,17 @@ export default function App() {
             const at = geometry.positions[centerId];
             const parent = node.parentId ? geometry.positions[node.parentId] : undefined;
             const size = geometry.sizes[centerId];
-            await flow.current.setCenter(
-              at.x + (parent?.x ?? 0) + size.width / 2,
-              at.y + (parent?.y ?? 0) + 50,
-              { zoom: 1, duration: 0 },
-            );
+            const bounds = canvas.current?.getBoundingClientRect();
+            if (bounds)
+              await flow.current.setViewport(
+                operationViewport(
+                  flow.current.getViewport(),
+                  { x: at.x + (parent?.x ?? 0), y: at.y + (parent?.y ?? 0), ...size },
+                  bounds,
+                  keepStepCenteredRef.current,
+                ),
+                { duration: 0 },
+              );
           } else if (initialNavigation) {
             const size = geometry.sizes[result.focus];
             const bounds = canvas.current?.getBoundingClientRect();
@@ -650,6 +758,13 @@ export default function App() {
     const current = latest.current.next();
     const started = performance.now();
     setBusy(true);
+    setBusyTask(
+      pendingLayoutAnchor.current || keepSourceOnReveal.current
+        ? 'Revealing region'
+        : impact
+          ? 'Tracing impact'
+          : 'Updating exploration',
+    );
     setError('');
     window.__SONAR_METRICS__.requests++;
 
@@ -664,7 +779,10 @@ export default function App() {
         return paintView(result, current, started);
       })
       .catch((err) => {
-        if (current()) setError(String(err));
+        if (current()) {
+          keepSourceOnReveal.current = undefined;
+          setError(String(err));
+        }
       })
       .finally(() => {
         if (current()) setBusy(false);
@@ -678,11 +796,11 @@ export default function App() {
     begin: (config) => {
       setBusy(true);
       setRoot(config.root);
-      setQuery(config.query);
     },
     opened: (summary) => {
       positions.current.clear();
       setProject(summary);
+      setProjectMenuOpen(false);
     },
     render: (result, valid, started, presentation) => {
       setRequest(requestFor(result.focus));
@@ -701,66 +819,206 @@ export default function App() {
     ? view?.summaries.find((summary) => summary.nodeId === selectedNode.id)
     : undefined;
 
-  const comparedFunction =
-    view?.behaviors?.find((behavior) => behavior.returns.some((node) => node.id === outcomeId))
-      ?.symbolId ?? view?.nodes.find((node) => node.id === outcomeId)?.parentId;
+  const loadSource = useCallback(
+    async (span: SourceSpan) => {
+      const current = sourceLatest.current.next();
+      sourceOwner.current = {
+        id: selectedRef.current?.id,
+        snapshot: project?.snapshot,
+      };
+      setEvidence(span);
+      setExcerpt(undefined);
+      setSourceError('');
+      if (
+        !span.file ||
+        span.line <= 0 ||
+        (project?.root && !span.file.startsWith(`${project.root.replace(/\/$/, '')}/`))
+      ) {
+        setSourceLoading(false);
+        return;
+      }
+      setSourceLoading(true);
+      try {
+        const result = await backend.source(span);
+        if (current()) setExcerpt(result);
+      } catch (err) {
+        if (current()) setSourceError(String(err));
+      } finally {
+        if (current()) setSourceLoading(false);
+      }
+    },
+    [project?.root, project?.snapshot],
+  );
 
-  const inspect = async (span: SourceSpan) => {
-    const current = sourceLatest.current.next();
-    setExcerpt(undefined);
-    setEvidence(span);
-    try {
-      const result = await backend.source(span);
-      if (current()) setExcerpt(result);
-    } catch (err) {
-      if (current()) setError(String(err));
-    }
-  };
+  const inspect = useCallback(
+    (span: SourceSpan, occurrenceExpression?: string) => {
+      sourceRecoveryBlocked.current = false;
+      sourceTarget.current = evidenceTarget(
+        selectedRef.current,
+        span,
+        viewRef.current,
+        occurrenceExpression,
+      );
+      return loadSource(span);
+    },
+    [loadSource],
+  );
+
+  useEffect(() => {
+    if (
+      !inspectorOpen ||
+      !selected ||
+      !project ||
+      view?.snapshot !== project.snapshot ||
+      benchmarking.current
+    )
+      return;
+    const pending = reopenSource.current;
+    if (sourceRecoveryBlocked.current && !pending) return;
+    if (
+      sourceOwner.current?.id === selected.id &&
+      sourceOwner.current.snapshot === project.snapshot
+    )
+      return;
+    reopenSource.current = undefined;
+    const span =
+      pending?.snapshot === project.snapshot && pending.source
+        ? pending.source
+        : 'name' in selected
+          ? selected.source
+          : selected.evidence;
+    void inspect(
+      span,
+      pending?.item && 'evidence' in pending.item ? pending.item.expression : undefined,
+    );
+  }, [selected?.id, project?.snapshot, view?.snapshot, inspectorOpen, sourceError, inspect]);
 
   const select = (value: ViewNode | ViewEdge) => {
-    setInspectorOpen(true);
-    sourceLatest.current.invalidate();
+    if (sourceRecoveryBlocked.current) setSourceError('');
+    sourceRecoveryBlocked.current = false;
+    reopenSource.current = undefined;
+    selectedRef.current = value;
     setSelected(value);
+    setPinned(true);
+    transientOrder.current.identity = ++transientOrder.current.sequence;
     setHovered(undefined);
-    setExcerpt(undefined);
   };
 
-  const change = (updates: Partial<GraphRequest>) => {
+  const change = (updates: Partial<GraphRequest>, preserveTrail = false) => {
     if (!request) return;
     const next = {
       ...request,
       ...updates,
       ...((updates.kinds || updates.direction) && !updates.offsets ? { offsets: {} } : {}),
     };
-    if (updates.kinds || updates.direction || updates.neighborLimit)
-      preferences.current = {
+    if (updates.kinds || updates.direction || updates.neighborLimit || 'neighborKind' in updates)
+      preferences.current[categoryFor(focusKind.current)] = {
         kinds: next.kinds,
         direction: next.direction,
         neighborLimit: next.neighborLimit,
+        neighborKind: next.neighborKind,
       };
+    if (
+      !preserveTrail &&
+      updates.internals &&
+      trail &&
+      !updates.internals.includes(trail.functionId)
+    ) {
+      setTrail(undefined);
+      setOutcomeId(undefined);
+    }
     if (updates.internals) {
-      if (request.internals.includes(request.focus) && !updates.internals.includes(request.focus))
-        framedFocus.current = undefined;
-      if (trail && !updates.internals.includes(trail.functionId)) setTrail(undefined);
-      if (outcomeId && !updates.internals.includes(comparedFunction ?? request.focus))
-        setOutcomeId(undefined);
+      const added = updates.internals.find((id) => !request.internals.includes(id));
+      if (added) setOverviewFunctionId(added);
+      else if (overviewFunctionId && !updates.internals.includes(overviewFunctionId))
+        setOverviewFunctionId(undefined);
     }
     navigate(next);
   };
 
-  const showNode = (node: ViewNode) => {
+  const showNode = (node: ViewNode, centered = true) => {
     const at = positions.current.get(node.id);
-    if (!at) return;
+    const bounds = canvas.current?.getBoundingClientRect();
+    if (!at || !bounds || !flow.current) return;
     const parent = node.parentId ? positions.current.get(node.parentId) : undefined;
-    void flow.current?.setCenter(
-      at.x + (parent?.x ?? 0) + at.width / 2,
-      at.y + (parent?.y ?? 0) + Math.min(at.height, 100) / 2,
-      { zoom: 1, duration: 0 },
+    const viewport = flow.current.getViewport();
+    const next = operationViewport(
+      viewport,
+      {
+        x: at.x + (parent?.x ?? 0),
+        y: at.y + (parent?.y ?? 0),
+        width: at.width,
+        height: node.parentId ? at.height : Math.min(at.height, 100),
+      },
+      bounds,
+      centered,
     );
+    if (next.x !== viewport.x || next.y !== viewport.y)
+      void flow.current.setViewport(next, { duration: 0 });
+  };
+
+  const inspectOccurrence = (site: BindingOccurrence) => {
+    const node: ViewNode = view?.nodes.find((node) => node.id === site.nodeId) ?? {
+      id: site.nodeId,
+      parentId: site.functionId,
+      kind: site.nodeKind,
+      name: site.operationExpression,
+      qualifiedName: site.functionId,
+      packageId: '',
+      signature: '',
+      documentation: '',
+      source: site.operationSource,
+      details: {
+        role: '',
+        expression: site.operationExpression,
+        explanation: 'Previously revealed source operation.',
+        accesses: [{ ...site.access, id: binding?.id ?? '' }],
+      },
+    };
+    const span = site.access.source;
+    select(node);
+    void inspect(span);
+    if (view?.nodes.some((visible) => visible.id === node.id)) {
+      showNode(node, false);
+      return;
+    }
+    if (node.parentId && request && !busy) {
+      change({
+        focus: node.parentId,
+        internals: [...new Set([...request.internals.slice(-15), node.parentId])],
+        behaviorAnchors: { ...request.behaviorAnchors, [node.parentId]: node.id },
+      });
+      pendingSelection.current = node.id;
+    }
+  };
+
+  const openBehavior = (id: string) => {
+    if (!request || busy) return;
+    setOverviewFunctionId(id);
+    if (request.internals.includes(id)) return;
+    change({ internals: [...new Set([...request.internals.slice(-15), id])] });
+  };
+
+  const returnToStep = () => {
+    if (!trail || !request || busy) return;
+    const id = trail.steps.at(-1)?.nodeId;
+    setContinuationCallId(undefined);
+    const node = view?.nodes.find((node) => node.id === id);
+    if (node) {
+      select(node);
+      showNode(node, keepStepCentered);
+    } else if (id) {
+      pendingFlow.current = { functionId: trail.functionId, nodeId: id };
+      change({
+        internals: [...new Set([...request.internals.slice(-15), trail.functionId])],
+        behaviorAnchors: { ...request.behaviorAnchors, [trail.functionId]: id },
+      });
+    }
   };
 
   const startFlow = (id: string) => {
     if (!request || busy) return;
+    setOverviewFunctionId(id);
     setOutcomeId(undefined);
     setContinuationCallId(undefined);
     const entry =
@@ -770,7 +1028,7 @@ export default function App() {
       setTrail({ functionId: id, steps: [{ nodeId: entry }] });
       const node = view.nodes.find((node) => node.id === entry)!;
       select(node);
-      showNode(node);
+      showNode(node, keepStepCentered);
     } else {
       pendingFlow.current = { functionId: id };
       change({ internals: [...new Set([...request.internals.slice(-15), id])] });
@@ -779,14 +1037,26 @@ export default function App() {
 
   const reveal = (node: ViewNode) => {
     if (!request || busy) return;
+    keepSourceOnReveal.current = { id: selectedRef.current?.id, snapshot: view?.snapshot };
+    const at = positions.current.get(node.id);
+    if (at && node.details?.region)
+      pendingLayoutAnchor.current = { id: node.details.region.firstNodeId, position: at };
+    const replacing = (request.regions ?? []).filter(
+      (id) => id !== node.id && id.startsWith(`${node.parentId}/behavior/`),
+    );
     pendingFlow.current = flowAfterReveal(trail, node);
     if (!pendingFlow.current) pendingSelection.current = node.details?.region?.firstNodeId;
     change(revealRegion(request, node));
+    if (replacing.length)
+      setNavigationNotice(
+        `Revealing this region collapses the previously opened region in ${view?.nodes.find((parent) => parent.id === node.parentId)?.name ?? 'this function'} to stay within the view budget. Previous exploration restores it.`,
+      );
   };
 
   const step = (edge: ViewEdge) => {
-    if (!view || !trail || busy) return;
+    if (!view || !trail || trail.paused || busy) return;
     const next = followEdge(view, trail, edge.id);
+    if (next === trail) return;
     setTrail(next);
     setOutcomeId(undefined);
     setContinuationCallId(undefined);
@@ -799,7 +1069,7 @@ export default function App() {
       const node = view.nodes.find((node) => node.id === edge.target);
       if (node) {
         select(node);
-        showNode(node);
+        showNode(node, keepStepCentered);
       }
     }
   };
@@ -820,7 +1090,7 @@ export default function App() {
       },
     ]);
     navigate({
-      ...requestFor(node.relatedSymbolId!, 'function', preferences.current),
+      ...requestFor(node.relatedSymbolId!, 'function', preferences.current.function),
       internals: [node.relatedSymbolId!],
     });
     pendingFlow.current = { functionId: node.relatedSymbolId! };
@@ -838,6 +1108,7 @@ export default function App() {
     setTrail(undefined);
     setContinuationCallId(undefined);
     setOutcomeId(node.id);
+    setOverviewFunctionId(node.parentId);
     select(node);
     if (!view?.nodes.some((candidate) => candidate.id === node.id)) {
       pendingSelection.current = node.id;
@@ -847,39 +1118,171 @@ export default function App() {
 
   const peek = (value?: ViewNode | ViewEdge) => {
     if (hoverTimer.current) clearTimeout(hoverTimer.current);
-    if (value) setHovered(value);
-    else hoverTimer.current = setTimeout(() => setHovered(undefined), 180);
+    if (value) {
+      if (hovered?.id !== value.id)
+        transientOrder.current.identity = ++transientOrder.current.sequence;
+      setHovered(value);
+    } else hoverTimer.current = setTimeout(() => setHovered(undefined), 180);
   };
 
-  const keyboardIdentity = (event: React.FocusEvent<HTMLDivElement>) => {
-    const id = (event.target as HTMLElement).closest('[data-id]')?.getAttribute('data-id');
-    const value =
-      view?.nodes.find((node) => node.id === id) ?? view?.edges.find((edge) => edge.id === id);
-    if (value) peek(value);
+  const restoreFocus = (element: HTMLElement | null) => {
+    suppressIdentityFocus.current = true;
+    (element?.isConnected ? element : canvas.current)?.focus();
+    suppressIdentityFocus.current = false;
+  };
+
+  const dismissIdentity = () => {
+    if (hoverTimer.current) clearTimeout(hoverTimer.current);
+    setHovered(undefined);
+    setPinned(false);
+    restoreFocus(identityInvoker.current);
+  };
+
+  const openInspector = () => {
+    if (!inspectorOpen) {
+      const active = document.activeElement as HTMLElement | null;
+      inspectorInvoker.current = active?.closest('.identity-card')
+        ? identityInvoker.current
+        : active;
+    }
+    transientOrder.current.inspector = ++transientOrder.current.sequence;
+    if (inspectorOpen) inspector.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    setHovered(undefined);
+    setPinned(false);
+    setInspectorOpen(true);
+  };
+
+  const closeInspector = () => {
+    setInspectorOpen(false);
+    restoreFocus(inspectorInvoker.current);
   };
 
   useEffect(() => {
-    const dismiss = (event: KeyboardEvent) => {
+    if (inspectorOpen) inspector.current?.querySelector<HTMLButtonElement>('button')?.focus();
+  }, [inspectorOpen]);
+
+  const keyboardIdentity = (event: React.FocusEvent<HTMLDivElement>) => {
+    if (suppressIdentityFocus.current) return;
+    const target = (event.target as HTMLElement).closest<HTMLElement>('[data-id]');
+    const id = target?.getAttribute('data-id');
+    const value =
+      view?.nodes.find((node) => node.id === id) ?? view?.edges.find((edge) => edge.id === id);
+    if (value) {
+      identityInvoker.current = target ?? null;
+      peek(value);
+    }
+  };
+
+  const previousStep = () => {
+    if (!trail || trail.paused || busy || trail.steps.length < 2) return;
+    setContinuationCallId(undefined);
+    const steps = trail.steps.slice(0, -1);
+    setTrail({ ...trail, steps });
+    const id = steps.at(-1)?.nodeId;
+    const node = view?.nodes.find((node) => node.id === id);
+    if (node) {
+      select(node);
+      showNode(node, keepStepCentered);
+    } else if (id && request) {
+      pendingFlow.current = { functionId: trail.functionId, nodeId: id };
+      change({ behaviorAnchors: { ...request.behaviorAnchors, [trail.functionId]: id } });
+    }
+  };
+
+  const nextStep = () => {
+    if (!view || !trail || trail.paused || busy) return;
+    const node = view.nodes.find((node) => node.id === trail.steps.at(-1)?.nodeId);
+    if (!node) return;
+    if (['region', 'boundary'].includes(node.kind)) {
+      reveal(node);
+      return;
+    }
+    const choices = successors(view, node.id);
+    if (choices.length === 1) step(choices[0]);
+    else if (choices.length > 1) {
+      setNavigationNotice('Choose a destination to continue this branch.');
+      document
+        .querySelector<HTMLButtonElement>(
+          '.flow-navigation [aria-label="Step destinations"] button:not(:disabled):nth-child(2)',
+        )
+        ?.focus();
+    }
+  };
+
+  useEffect(() => {
+    const handle = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       if (event.key === 'Escape') {
-        setInspectorOpen(false);
-        setHovered(undefined);
-        setSelected(undefined);
-        setExcerpt(undefined);
-        sourceLatest.current.invalidate();
+        const layers = [
+          { name: 'project', visible: projectMenuOpen, order: transientOrder.current.project },
+          {
+            name: 'explorer',
+            visible: explorerOpen && window.matchMedia('(max-width: 750px)').matches,
+            order: transientOrder.current.explorer,
+          },
+          { name: 'reset', visible: resetPreview, order: transientOrder.current.reset },
+          {
+            name: 'identity',
+            visible: !!hovered || (pinned && !!selected),
+            order: transientOrder.current.identity,
+          },
+          { name: 'inspector', visible: inspectorOpen, order: transientOrder.current.inspector },
+        ]
+          .filter((layer) => layer.visible)
+          .sort((left, right) => right.order - left.order);
+        const top = layers[0]?.name;
+        if (top === 'project') {
+          if (projectMenu.current) projectMenu.current.open = false;
+          setProjectMenuOpen(false);
+          restoreFocus(projectMenu.current?.querySelector('summary') ?? null);
+        } else if (top === 'explorer') {
+          setExplorerOpen(false);
+          restoreFocus(explorerInvoker.current ?? explorerToggle.current);
+        } else if (top === 'reset') {
+          setResetPreview(false);
+          restoreFocus(resetInvoker.current);
+        } else if (top === 'identity') dismissIdentity();
+        else if (top === 'inspector') closeInspector();
+        else return;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        showExplorer();
+        searchInput.current?.focus();
+        searchInput.current?.select();
+        return;
+      }
+      if (isEditing(event.target) || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.key === '/') {
+        event.preventDefault();
+        showExplorer();
+        searchInput.current?.focus();
+      } else if (event.key.toLowerCase() === 'i' && selected) {
+        event.preventDefault();
+        openInspector();
+      } else if (event.key === '[') {
+        event.preventDefault();
+        previousStep();
+      } else if (event.key === ']') {
+        event.preventDefault();
+        nextStep();
       }
     };
-    window.addEventListener('keydown', dismiss);
-    return () => {
-      window.removeEventListener('keydown', dismiss);
-      if (hoverTimer.current) clearTimeout(hoverTimer.current);
-    };
-  }, []);
+    window.addEventListener('keydown', handle);
+    return () => window.removeEventListener('keydown', handle);
+  });
 
   const onNodesChange = (changes: NodeChange<SymbolNode>[]) => {
     setNodes((current) => applyNodeChanges(changes, current));
     if (changes.some((change) => change.type === 'position'))
       setEdges((current) =>
-        current.map((edge) => ({ ...edge, data: { ...edge.data, route: undefined } })),
+        current.map((edge) => ({
+          ...edge,
+          data: { ...edge.data, route: undefined },
+        })),
       );
 
     for (const change of changes)
@@ -889,36 +1292,84 @@ export default function App() {
       }
   };
 
+  const comparedFunction =
+    view?.behaviors?.find((behavior) => behavior.returns.some((node) => node.id === outcomeId))
+      ?.symbolId ?? view?.nodes.find((node) => node.id === outcomeId)?.parentId;
   const comparedPaths =
     outcomeId && view ? outcomePaths(view, comparedFunction ?? view.focus, outcomeId) : undefined;
   const activeOperation = currentOperation(trail, continuationCallId);
 
-  const focusNode = view?.nodes.find((node) => node.id === request?.focus);
-  const graphMode = request?.internals.includes(request.focus)
-    ? 'flow'
-    : request?.kinds.length === 1 && request.kinds[0] === 'calls'
-      ? request.direction
-      : undefined;
+  const focusNode = view?.nodes.find((node) => node.id === view.focus);
+  const focusCategory = categoryFor(focusNode?.kind ?? focusKind.current);
+  const behaviorOpen = !!request?.internals.includes(request.focus);
+  const followedNode = view?.nodes.find((node) => node.id === trail?.steps.at(-1)?.nodeId);
+  const returnedNode = view?.nodes.find((node) => node.id === continuationCallId);
+  const connectionNode = selectedNode && !selectedNode.parentId ? selectedNode : focusNode;
+  const connectionSummary = view?.summaries.find(
+    (summary) => summary.nodeId === connectionNode?.id,
+  );
+  const connected = selectionConnections(view, selected?.id);
+  const emphasized = graphEmphasis(connected, comparedPaths);
+
+  const breadcrumbs = explorationBreadcrumbs(history, request?.focus);
+  const collapseTarget = selectedNode?.parentId ?? selectedNode?.id;
+  const collapseName = nodeName(
+    view?.nodes,
+    collapseTarget,
+    selectedNode ? symbolName(selectedNode) : '',
+  );
+  const canCollapseSelected =
+    !!request &&
+    !!collapseTarget &&
+    (request.expanded.includes(collapseTarget) ||
+      request.internals.includes(collapseTarget) ||
+      !!request.groups?.[collapseTarget] ||
+      !!request.offsets?.[collapseTarget]);
+  const restoreExploration = (index: number) => {
+    if (busy) return;
+    const destination = history[index];
+    const frame = capture();
+    if (!destination || !frame) return;
+    setHistory(history.slice(0, index));
+    setFuture([...future, frame, ...history.slice(index + 1).reverse()].slice(-20));
+    restore(destination);
+  };
+
+  const showExplorer = () => {
+    if (!explorerOpen)
+      explorerInvoker.current =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    transientOrder.current.explorer = ++transientOrder.current.sequence;
+    flushSync(() => setExplorerOpen(true));
+  };
 
   const statusLabel = busy
-    ? 'Updating…'
+    ? `${busyTask}…`
     : view
       ? `${view.nodes.length} nodes · ${view.edges.length} edges${view.truncated ? ' · view limit reached' : ''}`
-      : 'Ready';
+      : 'Choose a project, then a symbol';
 
   return (
-    <div className={`app ${wideSource ? 'wide-source' : ''}`}>
+    <div
+      className={`app ${wideSource ? 'wide-source' : ''} ${inspectorOpen ? '' : 'inspector-closed'}`}
+    >
       <header>
         <div>
           <strong>Go Sonar</strong>
+          <span>Local Go code explorer</span>
         </div>
-        {!isDesktop && (
-          <b className="sample-banner" title="Illustrative data, not local analysis">
-            Sample preview
-          </b>
-        )}
-        <details className="project-menu" open={!project}>
-          <summary>{project?.name ?? 'Open project'}</summary>
+        {!isDesktop && <b className="sample-banner">SAMPLE PREVIEW · no local analysis</b>}
+        <details className="project-menu" ref={projectMenu} open={projectMenuOpen}>
+          <summary
+            onClick={(event) => {
+              event.preventDefault();
+              if (!projectMenuOpen)
+                transientOrder.current.project = ++transientOrder.current.sequence;
+              setProjectMenuOpen(!projectMenuOpen);
+            }}
+          >
+            {project?.name ?? 'Open project'}
+          </summary>
           <div className="project-popover">
             <form
               onSubmit={(event) => {
@@ -943,19 +1394,22 @@ export default function App() {
                 onClick={() => {
                   void chooseProjectFolder()
                     .then((path) => {
-                      if (path) setRoot(path);
+                      if (path) void loadProject(false, path);
                     })
                     .catch((error) => setError(String(error)));
                 }}
               >
-                Choose folder
+                Open folder
               </button>
             )}
             {isDesktop && !!recents.length && (
               <select
                 aria-label="Recent projects"
                 value=""
-                onChange={(event) => setRoot(event.target.value)}
+                disabled={busy}
+                onChange={(event) => {
+                  if (event.target.value) void loadProject(false, event.target.value);
+                }}
               >
                 <option value="">Recent projects</option>
                 {recents.map((path) => (
@@ -970,27 +1424,6 @@ export default function App() {
         <button disabled={!project || busy} onClick={() => void loadProject(true)}>
           Refresh
         </button>
-        <details className="project-info">
-          <summary>
-            Coverage{project?.diagnostics.length ? ` · ${project.diagnostics.length}` : ''}
-          </summary>
-          <div className="project-popover">
-            <p>Static source analysis. Runtime execution and dynamic targets are not proven.</p>
-            {project && (
-              <p>
-                {project.symbolCount} symbols · {project.relationCount} relations
-                <br />
-                {project.stats.analyzedPackages} packages analyzed · {project.stats.reusedPackages}{' '}
-                reused · {Math.round(project.stats.durationMs)} ms
-              </p>
-            )}
-            {project?.diagnostics.map((diagnostic, index) => (
-              <p key={index}>
-                {diagnostic.severity}: {diagnostic.message}
-              </p>
-            ))}
-          </div>
-        </details>
       </header>
       <div className="workspace">
         <aside className="explorer" hidden={!explorerOpen}>
@@ -1000,218 +1433,136 @@ export default function App() {
               ×
             </button>
           </div>
-          <label>
-            Search
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search symbols…"
-              disabled={!project}
-            />
-          </label>
-          <div className="matches">
-            {matches.map((symbol) => (
+          <p className="keyboard-help">
+            Shortcuts: Ctrl/Cmd+K or / search · I inspect · [ previous step · ] next step
+          </p>
+          <h2>{project?.name ?? 'Start an exploration'}</h2>
+          {project && (
+            <>
+              <p className="muted">
+                {project.symbolCount} symbols · {project.relationCount} relations
+              </p>
+              <p className="muted">
+                Snapshot {project.snapshot.slice(0, 12)}
+                <br />
+                {project.stats.analyzedPackages} packages analyzed · {project.stats.reusedPackages}{' '}
+                reused · {project.stats.changedFiles} files changed ·{' '}
+                {Math.round(project.stats.durationMs)} ms
+              </p>
+            </>
+          )}
+          <DiscoveryBrowser
+            key={project ? `${project.root}:${project.snapshot}` : 'empty'}
+            enabled={!!project && !benchmarking.current}
+            inputRef={searchInput}
+            onFocus={focusSymbol}
+            onResults={setMatches}
+          />
+          <h3>Explore a question</h3>
+          <div className="questions" aria-label="Exploration questions">
+            {QUESTIONS[focusCategory].map((question) => (
               <button
-                className="match"
-                key={symbol.id}
-                onClick={() => focusSymbol(symbol.id, symbol.kind)}
+                key={question.label}
+                disabled={!request || busy || !!impact}
+                aria-pressed={
+                  !!request &&
+                  !behaviorOpen &&
+                  request.direction === question.direction &&
+                  request.neighborKind === question.neighborKind &&
+                  request.kinds.length === question.kinds.length &&
+                  question.kinds.every((kind) => request.kinds.includes(kind))
+                }
+                onClick={() => {
+                  if (trail) setTrail({ ...trail, paused: true });
+                  setOutcomeId(undefined);
+                  change(
+                    {
+                      kinds: question.kinds,
+                      direction: question.direction,
+                      neighborKind: question.neighborKind,
+                      groups: {},
+                      internals: [],
+                    },
+                    true,
+                  );
+                }}
               >
-                <strong>{symbol.name}</strong>
-                <small>
-                  {symbol.kind} · {symbol.packageId}
-                </small>
+                {question.label}
               </button>
             ))}
+            {focusCategory === 'function' && (
+              <button
+                disabled={!request || busy || !!impact}
+                aria-pressed={behaviorOpen}
+                onClick={() => openBehavior(request!.focus)}
+              >
+                Flow
+              </button>
+            )}
           </div>
-          {searching && <p role="status">Searching symbols…</p>}
-          {project && !searching && !matches.length && (
-            <p className="muted">No matching symbols.</p>
+          {request?.neighborKind && (
+            <p className="muted">Methods using this type, including receiver and signature uses.</p>
           )}
-          {project && !request && (
-            <section className="first-exploration">
-              <h3>Entry points</h3>
-              {discovery?.entrypoints.map((symbol) => (
-                <button
-                  className="match"
-                  key={symbol.id}
-                  onClick={() => focusSymbol(symbol.id, symbol.kind)}
-                >
-                  <strong>{symbol.name}</strong>
-                  <small>{symbol.packageId}</small>
-                </button>
-              ))}
-            </section>
-          )}
-          {project && (
-            <details>
-              <summary>Browse declarations</summary>
-              <label>
-                Package
+          <details>
+            <summary>Filters</summary>
+            {RELATIONS.map((kind) => (
+              <label className="checkbox" key={kind}>
                 <input
-                  list="project-packages"
-                  value={browserPackage}
-                  onChange={(event) => {
-                    setBrowserPackage(event.target.value);
-                    setBrowserOffset(0);
-                  }}
-                  placeholder="All packages"
-                />
-                <datalist id="project-packages">
-                  {discovery?.packages.map((pkg) => (
-                    <option value={pkg} key={pkg} />
-                  ))}
-                </datalist>
-              </label>
-              {discovery && discovery.packageCount > discovery.packages.length && (
-                <p className="muted">
-                  {discovery.packageCount} packages. Enter a package path to browse one outside
-                  these suggestions.
-                </p>
-              )}
-              <label>
-                Declaration kind
-                <select
-                  value={browserKind}
-                  onChange={(event) => {
-                    setBrowserKind(event.target.value);
-                    setBrowserOffset(0);
-                  }}
-                >
-                  <option value="">All kinds</option>
-                  {[
-                    'function',
-                    'method',
-                    'struct',
-                    'interface',
-                    'type',
-                    'field',
-                    'variable',
-                    'constant',
-                  ].map((kind) => (
-                    <option key={kind} value={kind}>
-                      {kind}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {browserPage?.symbols.map((symbol) => (
-                <button
-                  key={symbol.id}
-                  className="match"
-                  onClick={() => focusSymbol(symbol.id, symbol.kind)}
-                >
-                  {symbol.name}
-                  <small>
-                    {symbol.kind} · {symbol.packageId}
-                  </small>
-                </button>
-              ))}
-              <p>{browserPage?.total ?? 0} declarations</p>
-              <div className="actions">
-                <button
-                  disabled={!browserOffset}
-                  onClick={() => setBrowserOffset(Math.max(0, browserOffset - 40))}
-                >
-                  Previous declarations
-                </button>
-                <button
-                  disabled={
-                    !browserPage || browserOffset + browserPage.symbols.length >= browserPage.total
+                  type="checkbox"
+                  checked={request?.kinds.includes(kind) ?? kind === 'calls'}
+                  disabled={!request || busy || !!impact}
+                  onChange={() =>
+                    change({ neighborKind: undefined, kinds: toggleId(request!.kinds, kind) })
                   }
-                  onClick={() => setBrowserOffset(browserOffset + 40)}
-                >
-                  More declarations
-                </button>
-              </div>
-            </details>
-          )}
+                />
+                {kind.replace('_', ' ')}
+              </label>
+            ))}
+            <label>
+              Neighbor direction
+              <select
+                disabled={!request || busy || !!impact}
+                value={request?.direction ?? 'outgoing'}
+                onChange={(event) =>
+                  change({
+                    direction: event.target.value as GraphRequest['direction'],
+                    neighborKind: undefined,
+                  })
+                }
+              >
+                <option value="both">Incoming and outgoing</option>
+                <option value="incoming">Incoming consumers</option>
+                <option value="outgoing">Outgoing dependencies</option>
+              </select>
+            </label>
+          </details>
+          <p className="muted">
+            At most {VIEW_LIMIT} nodes per view. Filters and collapsed branches hide relationships.
+          </p>
         </aside>
         <main>
           <div className="graph-toolbar">
             <button
+              ref={explorerToggle}
               aria-label="Toggle symbols"
               aria-expanded={explorerOpen}
-              onClick={() => setExplorerOpen(!explorerOpen)}
-            >
-              ☰
-            </button>
-            <div className="graph-modes" role="group" aria-label="Graph mode">
-              <button
-                disabled={!request || busy}
-                aria-pressed={graphMode === 'outgoing'}
-                onClick={() =>
-                  change({ kinds: ['calls'], direction: 'outgoing', groups: {}, internals: [] })
-                }
-              >
-                Calls
-              </button>
-              <button
-                disabled={!request || busy}
-                aria-pressed={graphMode === 'incoming'}
-                onClick={() =>
-                  change({ kinds: ['calls'], direction: 'incoming', groups: {}, internals: [] })
-                }
-              >
-                Callers
-              </button>
-              <button
-                disabled={
-                  !request || busy || !['function', 'method'].includes(focusNode?.kind ?? '')
-                }
-                aria-pressed={graphMode === 'flow'}
-                onClick={() => startFlow(request!.focus)}
-              >
-                Flow
-              </button>
-            </div>
-            <details className="graph-filters">
-              <summary>Filters</summary>
-              <div className="filter-popover">
-                {RELATIONS.map((kind) => (
-                  <label className="checkbox" key={kind}>
-                    <input
-                      type="checkbox"
-                      checked={request?.kinds.includes(kind) ?? kind === 'calls'}
-                      disabled={!request}
-                      onChange={() => change({ kinds: toggleId(request!.kinds, kind) })}
-                    />
-                    {kind.replace('_', ' ')}
-                  </label>
-                ))}
-                <label>
-                  Neighbor direction
-                  <select
-                    disabled={!request}
-                    value={request?.direction ?? 'outgoing'}
-                    onChange={(event) =>
-                      change({ direction: event.target.value as GraphRequest['direction'] })
-                    }
-                  >
-                    <option value="both">Incoming and outgoing</option>
-                    <option value="incoming">Incoming consumers</option>
-                    <option value="outgoing">Outgoing dependencies</option>
-                  </select>
-                </label>
-              </div>
-            </details>
-            <button
-              aria-label="Back"
-              title="Back"
-              disabled={!history.length || busy}
               onClick={() => {
-                const previous = history.at(-1)!;
-                const frame = capture();
-                setHistory(history.slice(0, -1));
-                if (frame) setFuture([...future.slice(-19), frame]);
-                restore(previous);
+                if (explorerOpen) setExplorerOpen(false);
+                else showExplorer();
               }}
             >
-              ←
+              Symbols
             </button>
             <button
-              aria-label="Forward"
-              title="Forward"
+              disabled={!history.length || busy}
+              title={`Restore ${explorationDestination(history.at(-1))}`}
+              onClick={() => restoreExploration(history.length - 1)}
+            >
+              Previous exploration
+            </button>
+            <button
               disabled={!future.length || busy}
+              title={`Restore ${explorationDestination(future.at(-1))}`}
               onClick={() => {
                 const next = future.at(-1)!;
                 const frame = capture();
@@ -1220,7 +1571,7 @@ export default function App() {
                 restore(next);
               }}
             >
-              →
+              Next exploration
             </button>
             <button
               disabled={!view}
@@ -1229,7 +1580,7 @@ export default function App() {
                 if (focus) showNode(focus);
               }}
             >
-              Center
+              Center focus
             </button>
             <button
               disabled={!view}
@@ -1246,32 +1597,151 @@ export default function App() {
                 if (bounds) void flow.current?.fitBounds(bounds, { padding: 0.2 });
               }}
             >
-              Fit
+              Fit graph
             </button>
             <button
-              disabled={!request}
-              onClick={() =>
-                change({
-                  expanded: [],
-                  internals: [],
-                  offsets: {},
-                  regions: [],
-                  behaviorAnchors: {},
-                  groups: {},
-                })
+              disabled={!canCollapseSelected || busy || !!impact}
+              title={
+                collapseName
+                  ? `Close ${collapseName}'s behavior and expanded neighbors only. Other branches stay open.`
+                  : 'Select an expanded declaration or its operation'
               }
+              onClick={() => {
+                if (!request || !selectedNode) return;
+                pendingSelection.current = collapseTarget;
+                if (comparedFunction === collapseTarget) setOutcomeId(undefined);
+                change(collapseBranch(request, selectedNode), trail?.functionId !== collapseTarget);
+              }}
             >
-              Collapse
+              Collapse selected branch
             </button>
             <button
-              disabled={!view}
+              disabled={!request || busy || !!impact}
+              aria-expanded={resetPreview}
+              aria-controls="reset-preview"
+              title="Review what will close before resetting this exploration"
+              onClick={(event) => {
+                resetInvoker.current = event.currentTarget;
+                if (!resetPreview) transientOrder.current.reset = ++transientOrder.current.sequence;
+                setResetPreview(!resetPreview);
+              }}
+            >
+              Reset to focus
+            </button>
+            <button
+              disabled={!selected}
               aria-expanded={inspectorOpen}
-              onClick={() => setInspectorOpen(!inspectorOpen)}
+              aria-controls="evidence-inspector"
+              onClick={openInspector}
+              aria-keyshortcuts="i"
+              title="Inspect selected item (I)"
             >
               Inspect
             </button>
             <span role="status">{statusLabel}</span>
           </div>
+          {resetPreview && request && (
+            <div
+              className="notice reset-preview"
+              id="reset-preview"
+              role="region"
+              aria-label="Reset exploration"
+            >
+              <p>
+                Reset to {focusNode ? symbolName(focusNode) : 'the focused declaration'} closes{' '}
+                {request.expanded.length} expanded neighbor branches and {request.internals.length}{' '}
+                function behaviors. It clears package filters, region and page detail, and ends
+                walkthrough and call navigation. Relationship filters and saved explorations remain
+                available.
+              </p>
+              <div className="actions">
+                <button
+                  disabled={busy}
+                  onClick={() => {
+                    pendingFlow.current = undefined;
+                    pendingLayoutAnchor.current = undefined;
+                    pendingSelection.current = request.focus;
+                    setCalls([]);
+                    setTrail(undefined);
+                    setOutcomeId(undefined);
+                    setOverviewFunctionId(undefined);
+                    setContinuationCallId(undefined);
+                    change(resetToFocus(request));
+                  }}
+                >
+                  Apply reset
+                </button>
+                <button
+                  onClick={() => {
+                    setResetPreview(false);
+                    restoreFocus(resetInvoker.current);
+                  }}
+                >
+                  Keep exploration
+                </button>
+              </div>
+            </div>
+          )}
+          {view && (
+            <nav className="exploration-breadcrumb" aria-label="Exploration breadcrumb">
+              <ol>
+                {breadcrumbs.map(({ frame, index }) => (
+                  <li key={index}>
+                    <button
+                      disabled={busy}
+                      title={`Restore ${explorationDestination(frame)}`}
+                      onClick={() => restoreExploration(index)}
+                    >
+                      {frame.focusLabel ?? frame.request.focus}
+                    </button>
+                  </li>
+                ))}
+                <li aria-current="location">{focusNode ? symbolName(focusNode) : view.focus}</li>
+              </ol>
+            </nav>
+          )}
+          {view && (
+            <div className="exploration-context" role="status">
+              <span>Exploring {focusNode ? symbolName(focusNode) : view.focus}</span>
+              {trail && (
+                <span>
+                  {trail.paused ? 'Paused at' : 'Following'}{' '}
+                  {followedNode
+                    ? `line ${followedNode.source.line} · ${followedNode.name}`
+                    : 'a hidden operation'}
+                </span>
+              )}
+              {continuationCallId && (
+                <span>
+                  Returned to {returnedNode?.name ?? 'call'} · line{' '}
+                  {returnedNode?.source.line ?? '?'}
+                </span>
+              )}
+              {selected && (
+                <span>
+                  {inspectorOpen ? 'Inspecting' : 'Selected'}{' '}
+                  {(selectedNode ? operationName(selectedNode) : undefined) ??
+                    ('label' in selected ? selected.label || selected.kind : selected.kind)}
+                </span>
+              )}
+              {trail && selected?.id !== followedNode?.id && (
+                <button disabled={busy} onClick={returnToStep}>
+                  Return to current step
+                </button>
+              )}
+            </div>
+          )}
+          {connectionNode && connectionSummary && request && (
+            <ConnectionSummary
+              node={connectionNode}
+              summary={connectionSummary}
+              view={view!}
+              request={request}
+              busy={busy || !!impact}
+              onChange={change}
+              onRequest={(next) => navigate(next)}
+            />
+          )}
           {navigationNotice && (
             <div className="notice" role="status">
               {navigationNotice}
@@ -1279,13 +1749,16 @@ export default function App() {
           )}
           {error && (
             <div role="alert" className="error">
-              {error}
+              <p>{error}</p>
+              <button disabled={busy} onClick={() => void loadProject(!!project)}>
+                Retry {project ? 'analysis' : 'opening project'}
+              </button>
             </div>
           )}
           {impact && (
             <div className="notice">
-              Potential {impact} impact · direct candidates, not proven breakage.
-              <button onClick={() => setImpact('')}>Exit impact</button>
+              Hypothetical {impact} change: candidates for inspection, not proven breakage. Dynamic
+              behavior and incomplete coverage may hide effects.
             </div>
           )}
           <FlowNavigator
@@ -1296,30 +1769,24 @@ export default function App() {
             outcomeId={outcomeId}
             outcomePartial={comparedPaths?.partial}
             continuationCallId={continuationCallId}
+            busy={busy || !!impact}
+            keepStepCentered={keepStepCentered}
+            onKeepStepCentered={setKeepStepCentered}
+            onResume={() => {
+              if (trail && !busy) {
+                setTrail({ ...trail, paused: false });
+                returnToStep();
+              }
+            }}
+            onPause={() => {
+              if (trail && !busy) setTrail({ ...trail, paused: true });
+            }}
             functionId={
-              comparedFunction ??
-              selectedNode?.parentId ??
-              (view?.behaviors?.some((b) => b.symbolId === selectedNode?.id)
-                ? selectedNode?.id
-                : undefined)
+              comparedFunction ?? overviewFunctionId ?? (behaviorOpen ? request?.focus : undefined)
             }
             onStart={startFlow}
             onStep={step}
-            onBack={() => {
-              if (!trail || busy) return;
-              setContinuationCallId(undefined);
-              const steps = trail.steps.slice(0, -1);
-              setTrail({ ...trail, steps });
-              const id = steps.at(-1)?.nodeId;
-              const node = view?.nodes.find((node) => node.id === id);
-              if (node) {
-                select(node);
-                showNode(node);
-              } else if (id && request) {
-                pendingFlow.current = { functionId: trail.functionId, nodeId: id };
-                change({ behaviorAnchors: { ...request.behaviorAnchors, [trail.functionId]: id } });
-              }
-            }}
+            onBack={previousStep}
             onReveal={reveal}
             onOutcome={compareOutcome}
             onOutcomePage={(id, offset) =>
@@ -1332,9 +1799,12 @@ export default function App() {
               setContinuationCallId(undefined);
             }}
           />
+          <BranchHistory trail={trail} />
+          {view && <GraphLegend view={view} />}
           <div
-            className="canvas"
+            className={`canvas ${animateLayout ? 'layout-changing' : ''}`}
             ref={canvas}
+            tabIndex={-1}
             onFocusCapture={keyboardIdentity}
             onKeyDownCapture={(event) => {
               if (
@@ -1353,7 +1823,7 @@ export default function App() {
                 return {
                   ...node,
                   selected: selected?.id === node.id,
-                  className: `${activeOperation === node.id ? 'current-operation' : ''} ${paths && node.parentId && !paths.nodes.has(node.id) ? 'dimmed' : ''}`,
+                  className: `${node.data.newlyRevealed ? 'newly-revealed' : ''} ${emphasized.endpoints.has(node.id) ? 'connected-endpoint' : ''} ${activeOperation === node.id ? 'current-operation' : ''} ${paths && node.parentId && !paths.nodes.has(node.id) && !emphasized.endpoints.has(node.id) ? 'dimmed' : ''}`,
                 };
               })}
               edges={edges.map((edge) => {
@@ -1362,32 +1832,28 @@ export default function App() {
                 return {
                   ...edge,
                   selected: selected?.id === edge.id,
-                  className: `${edge.className ?? ''} ${
-                    paths && !paths.edges.has(edge.id)
-                      ? 'dimmed'
-                      : view?.edges.some(
-                            (candidate) =>
-                              candidate.id === edge.id &&
-                              candidate.source === current &&
-                              candidate.kind === 'control',
-                          )
-                        ? 'next-operation'
-                        : ''
-                  }`,
+                  className: `${edge.className ?? ''} ${paths || selected ? (emphasized.edges.has(edge.id) ? 'connected-relationship' : 'dimmed') : ''} ${!paths && view?.edges.some((candidate) => candidate.id === edge.id && candidate.source === current && candidate.kind === 'control') ? 'next-operation' : ''}`,
                 };
               })}
               nodeTypes={nodeTypes}
               edgeTypes={edgeTypes}
+              colorMode="dark"
               onInit={(instance) => {
                 flow.current = instance;
               }}
               onNodesChange={onNodesChange}
-              onNodeClick={(_, node) => {
+              onNodeClick={(event, node) => {
+                identityInvoker.current = (event.target as HTMLElement).closest<HTMLElement>(
+                  '[data-id]',
+                );
                 const fact = view?.nodes.find((value) => value.id === node.id);
 
                 if (fact) select(fact);
               }}
-              onEdgeClick={(_, edge) => {
+              onEdgeClick={(event, edge) => {
+                identityInvoker.current = (event.target as HTMLElement).closest<HTMLElement>(
+                  '[data-id]',
+                );
                 const fact = view?.edges.find((value) => value.id === edge.id);
 
                 if (fact) select(fact);
@@ -1404,11 +1870,18 @@ export default function App() {
                 const fact = view?.nodes.find((value) => value.id === node.id);
 
                 if (fact) {
-                  if (canEnterCall(fact)) enterCall(fact);
-                  else focusSymbol(fact.parentId ?? fact.id, fact.kind);
+                  select(fact);
+                  openInspector();
                 }
               }}
-              colorMode="dark"
+              onEdgeDoubleClick={(_, edge) => {
+                const fact = view?.edges.find((value) => value.id === edge.id);
+                if (fact) {
+                  select(fact);
+                  openInspector();
+                }
+              }}
+              zoomOnDoubleClick={false}
               nodesConnectable={false}
               edgesReconnectable={false}
               deleteKeyCode={null}
@@ -1417,13 +1890,14 @@ export default function App() {
               maxZoom={2}
               onPaneClick={() => {
                 setHovered(undefined);
+                setPinned(false);
               }}
             >
               <Background gap={24} color="var(--border)" />
               <Controls showInteractive={false} />
               {nodes.length > 12 && <MiniMap pannable zoomable />}
             </ReactFlow>
-            {hovered && !inspectorOpen && (
+            {(hovered || (pinned && selected)) && (
               <div
                 onMouseEnter={() => {
                   if (hoverTimer.current) clearTimeout(hoverTimer.current);
@@ -1433,77 +1907,140 @@ export default function App() {
                 <IdentityCard
                   value={hovered ?? selected!}
                   nodes={view?.nodes ?? []}
+                  pinned={pinned && selected?.id === (hovered ?? selected)?.id}
                   onPin={() => {
                     const value = hovered ?? selected;
                     if (value) select(value);
                   }}
-                  onDismiss={() => {
-                    setHovered(undefined);
+                  onInspect={() => {
+                    const value = hovered ?? selected;
+                    if (value) {
+                      select(value);
+                      openInspector();
+                    }
                   }}
+                  onDismiss={dismissIdentity}
                 />
               </div>
             )}
             {!view && !busy && (
               <div className="empty">
-                <strong>{project ? 'Choose a symbol' : 'Open a Go module'}</strong>
-                <p>
-                  {project
-                    ? 'Search or browse declarations to start.'
-                    : 'Use the project menu above.'}
-                </p>
+                Explore calls, data relationships, and static function behavior.
+                <br />
+                {project ? (
+                  <>
+                    <p>
+                      Choose a declaration in Find any symbol. Packages and types are starting
+                      points for libraries.
+                    </p>
+                    <button
+                      onClick={() => {
+                        showExplorer();
+                        searchInput.current?.focus();
+                      }}
+                    >
+                      Find a starting point
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => {
+                      if (isDesktop)
+                        void chooseProjectFolder()
+                          .then((path) => {
+                            if (path) void loadProject(false, path);
+                          })
+                          .catch((error) => setError(String(error)));
+                      else void loadProject();
+                    }}
+                  >
+                    {isDesktop ? 'Open folder' : 'Open sample'}
+                  </button>
+                )}
               </div>
             )}
           </div>
+          {project?.diagnostics.length ? (
+            <details className="diagnostics">
+              <summary>{coverageLabel(project.diagnostics)}</summary>
+              {project.diagnostics.map((diagnostic, index) => (
+                <p key={index}>
+                  {diagnostic.severity}: {diagnostic.message}{' '}
+                  {diagnostic.packageId && `(${diagnostic.packageId})`}
+                </p>
+              ))}
+            </details>
+          ) : project ? (
+            <p className="coverage">
+              Analysis completed without package errors. Static evidence cannot establish runtime
+              execution or resolve every dynamic target.
+            </p>
+          ) : null}
         </main>
-        {inspectorOpen && (
-          <aside className="inspector">
-            <div className="panel-heading">
-              <button
-                aria-label="Close inspector"
-                onClick={() => {
-                  setInspectorOpen(false);
-                  setHovered(undefined);
-                }}
-              >
-                ×
-              </button>
-              <button className="source-width" onClick={() => setWideSource(!wideSource)}>
-                {wideSource ? 'Narrow' : 'Widen'}
-              </button>
-            </div>
-            <EvidenceInspector
-              selected={selected}
-              summary={selectedSummary}
-              view={view}
-              request={request}
-              root={project?.root}
-              busy={busy}
-              impact={impact}
-              excerpt={excerpt}
-              evidence={evidence}
-              callDepth={calls.length}
-              onFocus={focusSymbol}
-              onUsage={(id) => navigate(requestFor(id, 'field'))}
-              onChange={change}
-              onEnter={enterCall}
-              onFollow={startFlow}
-              onReveal={reveal}
-              onSelect={select}
-              onSource={(span) => void inspect(span)}
-              onImpact={(id, category) => {
-                if (request) {
-                  navigate({ ...request, focus: id });
-                  setImpact(category);
-                }
-              }}
-              onPage={(direction) => {
-                if (request && selectedNode && selectedSummary)
-                  navigate(neighborPage(request, selectedNode.id, selectedSummary, direction));
-              }}
-              onShow={showNode}
-            />
-          </aside>
-        )}
+        <aside
+          ref={inspector}
+          hidden={!inspectorOpen}
+          onKeyDown={(event) => {
+            if (window.matchMedia('(max-width: 750px)').matches) trapFocus(event);
+          }}
+          className="inspector"
+          id="evidence-inspector"
+          aria-label="Evidence inspector"
+        >
+          <button onClick={closeInspector}>Close inspector</button>
+          <button className="source-width" onClick={() => setWideSource(!wideSource)}>
+            {wideSource ? 'Compact source panel' : 'Widen source panel'}
+          </button>
+          <EvidenceInspector
+            selected={selected}
+            summary={selectedSummary}
+            view={view}
+            request={request}
+            root={project?.root}
+            busy={busy}
+            impact={impact}
+            excerpt={excerpt}
+            evidence={evidence}
+            sourceLoading={sourceLoading}
+            sourceError={sourceError}
+            onRetrySource={() => {
+              if (evidence) void loadSource(evidence);
+            }}
+            onRefreshSource={() => {
+              void loadProject(true, root, true);
+            }}
+            binding={binding}
+            onBinding={setBinding}
+            onOccurrence={inspectOccurrence}
+            onDismissBinding={() => setBinding(undefined)}
+            callDepth={calls.length}
+            onFocus={focusSymbol}
+            onUsage={(id) => focusSymbol(id, 'field')}
+            onChange={change}
+            onEnter={enterCall}
+            onFollow={openBehavior}
+            onGroup={(nodeId, group) => {
+              if (request) navigate(revealGroup(request, nodeId, group));
+            }}
+            onClearGroup={(nodeId) => {
+              if (request) navigate(clearGroup(request, nodeId));
+            }}
+            onReveal={reveal}
+            onSelect={select}
+            onSource={(span, expression) => void inspect(span, expression)}
+            onImpact={(id, category) => {
+              if (request) {
+                navigate({ ...request, focus: id });
+                setImpact(category);
+              }
+            }}
+            onPage={(direction) => {
+              if (request && selectedNode && selectedSummary)
+                navigate(neighborPage(request, selectedNode.id, selectedSummary, direction));
+            }}
+            onShow={(node) => showNode(node)}
+          />
+        </aside>
       </div>
     </div>
   );

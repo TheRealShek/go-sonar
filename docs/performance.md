@@ -75,3 +75,5 @@ No architecture component gets an assumed performance pass. A slow Go analyzer, 
 Use the optimized builds and commands in the [development guide](development.md#run-benchmarks). Headless results exclude layout and rendering. Foreground desktop results include frame publication; background commit results explicitly exclude it. Keep those measurements separate.
 
 The current sampler uses 25 ms intervals and can miss brief peaks. Existing runs retain Go toolchain and OS file caches. Broader production workloads, repeated tail-latency measurements, sustained memory checks, and numerical release budgets remain unfinished.
+
+Pinned binding investigations retain at most 200 lightweight occurrence records for one binding and one snapshot. The inspector renders pages of 20 occurrences. Eviction is visible, and revealing a discarded region reacquires its sites. Source recovery returns at most one resolved occurrence and reports ambiguous matches instead of transferring candidate lists.

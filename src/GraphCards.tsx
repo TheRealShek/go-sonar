@@ -1,5 +1,6 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 import type { ViewNode, ViewEdge } from './shared/protocol';
+import { symbolName, compactPackage } from './identity';
 
 export type SymbolNode = Node<{
   label: string;
@@ -10,6 +11,8 @@ export type SymbolNode = Node<{
   role?: string;
   join?: boolean;
   limitation?: string;
+  newlyRevealed?: boolean;
+  packageId: string;
 }>;
 
 export function SymbolCard({ data }: NodeProps<SymbolNode>) {
@@ -25,9 +28,15 @@ export function SymbolCard({ data }: NodeProps<SymbolNode>) {
           {data.role ?? data.kind}
           {data.grouped ? ' · static behavior' : ''}
           {data.join ? ' · join' : ''}
+          {data.newlyRevealed && <span className="new-node-label">New</span>}
         </small>
-        <strong>{data.label}</strong>
-        <span>{data.limitation ? 'Analysis boundary' : data.summary}</span>
+        <strong className={behavior ? 'behavior-expression' : undefined} title={data.label}>
+          {data.label}
+        </strong>
+        <span className="node-package" title={data.packageId}>
+          {compactPackage(data.packageId)}
+        </span>
+        <span>{data.limitation ? 'Analysis boundary · inspect details' : data.summary}</span>
       </div>
       <Handle type="source" position={behavior ? Position.Bottom : Position.Right} />
       {decision && (
@@ -56,19 +65,24 @@ export const formatSource = (span: { file: string; line: number; column: number 
 export function IdentityCard({
   value,
   nodes,
+  pinned,
   onPin,
   onDismiss,
+  onInspect,
 }: {
   value: ViewNode | ViewEdge;
   nodes: ViewNode[];
+  pinned: boolean;
   onPin: () => void;
   onDismiss: () => void;
+  onInspect: () => void;
 }) {
   const node = 'name' in value ? value : undefined;
   const source = node?.source ?? (value as ViewEdge).evidence;
   const target = !node ? nodes.find((n) => n.id === (value as ViewEdge).target) : undefined;
   const caller = !node ? nodes.find((n) => n.id === (value as ViewEdge).source) : undefined;
   const callee = node?.relatedSymbolId ? nodes.find((n) => n.id === node.relatedSymbolId) : target;
+  const parent = node?.parentId ? nodes.find((n) => n.id === node.parentId) : undefined;
   return (
     <section
       className="identity-card"
@@ -76,7 +90,11 @@ export function IdentityCard({
       onMouseEnter={(event) => event.stopPropagation()}
     >
       <div className="identity-title">
-        <strong>{node?.name ?? `${caller?.name ?? 'Caller'} → ${target?.name ?? 'Target'}`}</strong>
+        <strong>
+          {node
+            ? symbolName(node)
+            : `${caller ? symbolName(caller) : 'Caller'} → ${target ? symbolName(target) : 'Target'}`}
+        </strong>
         <button aria-label="Dismiss details" onClick={onDismiss}>
           ×
         </button>
@@ -88,9 +106,7 @@ export function IdentityCard({
           (value as ViewEdge).label}
       </code>
       <p>{node?.packageId ?? caller?.packageId}</p>
-      {node?.parentId && (
-        <p>Within {nodes.find((n) => n.id === node.parentId)?.name ?? node.qualifiedName}</p>
-      )}
+      {node?.parentId && <p>Within {parent ? symbolName(parent) : node.qualifiedName}</p>}
       {callee && (
         <>
           <small>Target declaration</small>
@@ -105,8 +121,9 @@ export function IdentityCard({
         </>
       )}
       <small>{formatSource(source)}</small>
-
-      <button onClick={onPin}>Inspect</button>
+      {!node && <p>Static source relationship. It does not establish observed execution.</p>}
+      <button onClick={onPin}>{pinned ? 'Details pinned' : 'Pin details'}</button>
+      <button onClick={onInspect}>Inspect</button>
     </section>
   );
 }

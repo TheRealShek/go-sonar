@@ -298,6 +298,35 @@ main {
   white-space: nowrap;
 }
 
+.symbol-card .behavior-expression {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 18px;
+  max-height: 54px;
+}
+
+.symbol-card .node-package {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.connected-endpoint .symbol-card {
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 1px var(--cyan);
+}
+
+.connected-relationship .react-flow__edge-path:not(.edge-halo) {
+  stroke-width: 2.5;
+}
+.connected-relationship .react-flow__edge-text {
+  font-weight: 700;
+}
+
 .symbol-card small {
   font-size: 10px;
   color: var(--muted-foreground);
@@ -456,8 +485,50 @@ summary:focus-visible {
   color: var(--foreground);
 }
 .conditions {
-  padding-left: 20px;
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+  overflow-x: auto;
+  list-style: none;
+  padding: 7px 12px;
+  margin: 0;
+  background: var(--canvas);
+  border-bottom: 1px solid var(--border);
   font-size: 12px;
+}
+.conditions li {
+  flex-shrink: 0;
+  white-space: nowrap;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.graph-legend {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  padding: 7px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+.graph-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.legend-line {
+  display: inline-block;
+  width: 22px;
+  border-top: 2px solid var(--accent);
+}
+.legend-line.possible {
+  border-top-style: dashed;
 }
 .call-breadcrumb {
   display: flex;
@@ -565,7 +636,7 @@ summary:focus-visible {
   outline: 3px solid var(--accent);
   outline-offset: 4px;
 }
-.react-flow__edge:focus-visible path {
+.react-flow__edge:focus-visible .react-flow__edge-path:not(.edge-halo) {
   stroke-width: 4;
 }
 .dimmed {
@@ -695,4 +766,129 @@ summary:focus-visible {
 }
 .react-flow__edge:hover .react-flow__edge-path:not(.edge-halo) {
   stroke-width: 3;
+}
+.exploration-context,
+.connection-summary {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  overflow-wrap: anywhere;
+}
+.exploration-context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.exploration-context span + span::before {
+  content: '· ';
+}
+.connection-summary p {
+  margin: 6px 0;
+}
+.filter-chip,
+.questions button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--selection);
+}
+.connection-summary .actions,
+.flow-navigation .actions {
+  align-items: center;
+}
+.connection-summary details {
+  margin-top: 6px;
+}
+.exploration-breadcrumb {
+  padding: 6px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.exploration-breadcrumb ol {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.exploration-breadcrumb li + li::before {
+  content: '›';
+  padding-right: 6px;
+}
+.reset-preview p {
+  margin: 0 0 8px;
+}
+.layout-changing .react-flow__node {
+  transition:
+    transform 180ms ease,
+    width 180ms ease,
+    height 180ms ease;
+}
+.newly-revealed .symbol-card {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.symbol-card .new-node-label {
+  display: inline;
+  margin-left: 8px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--selection);
+  color: var(--cyan);
+  font-weight: 600;
+}
+@media (prefers-reduced-motion: reduce) {
+  .layout-changing .react-flow__node {
+    transition: none;
+  }
+}
+.inspector[hidden] {
+  display: none;
+}
+.binding-investigation {
+  border: 1px solid var(--border);
+  padding: 10px;
+  margin-bottom: 12px;
+  max-height: 24vh;
+  overflow: auto;
+}
+.source pre > .source-line {
+  display: block;
+  min-height: 1.7em;
+}
+.source pre .source-line > span {
+  display: inline;
+  min-height: 0;
+}
+.source pre {
+  position: relative;
+}
+.line-number {
+  color: var(--muted-foreground);
+  user-select: none;
+}
+.syntax-keyword {
+  color: var(--magenta);
+  font-weight: 600;
+}
+.syntax-string {
+  color: var(--green);
+}
+.syntax-comment {
+  color: var(--muted-foreground);
+  font-style: italic;
+}
+.syntax-number {
+  color: var(--yellow);
+}
+.keyboard-help {
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.discovery-browser .matches {
+  max-height: 30vh;
+}
+
+.empty button {
+  pointer-events: auto;
 }

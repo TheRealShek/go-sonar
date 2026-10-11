@@ -123,3 +123,21 @@ The three line-style images were compared with identical LLM Gate node positions
 The unused corner-rounding helper and its two tests were removed. All 39 remaining frontend tests passed. TypeScript, production frontend, native release build, formatting, and diff checks passed. Browser checks confirmed original call curves, square Flow routes, source inspection, neighbor expansion, dark mode under a light system preference, hover labels, and selection colors. No browser errors were observed.
 
 Three native background cycles of expansion, behavior, refocus, and collapse completed without timeout or stderr diagnostics. These checks exclude displayed frames. LLM Gate remained unchanged, confirmed by matching all 22 file hashes and Git status.
+
+## Reconcile graph presentation with exploration behavior, 2026-10-11
+
+PR [#2](https://github.com/TheRealShek/go-sonar/pull/2) now includes the behavior merged in PR [#3](https://github.com/TheRealShek/go-sonar/pull/3). The reconciliation retains horizontal call neighborhoods, Nord call curves, readable initial framing, dark mode, the comparison images, and collapsible project, Symbols, and filter controls.
+
+Selection and Escape keep the exploration and source investigation. Inspection remains explicit. Flow opens an overview with explicit walkthrough actions. Category preferences, scoped collapse, reset preview, source recovery, binding investigations, disclosure landmarks, and return-route emphasis retain the merged behavior.
+
+ELK routes are valid only while displayed node positions and sizes match the routing geometry. Preserving disclosure landmarks or dragging nodes can invalidate those routes. Flow then uses square bends attached to the current handles; these paths can cross intervening nodes. Landmark preservation takes precedence over rerouting the entire view.
+
+Validation passed:
+
+- All 82 frontend tests, including incoming/outgoing fan-out route presence, obstacle avoidance, saved landmark retention, invalidated routes, and readable initial framing.
+- TypeScript and the production frontend build, formatting, and diff whitespace checks.
+- All 28 native integration tests and the native workspace build.
+- Headless Chromium checks on the illustrative sample at 1440 × 900 and 700 × 800. Covered dark mode under a light system preference, explicit inspection, preserved selection after Escape, ordered project-menu and compact Symbols dismissal with focus restoration, repeated search shortcuts, and Flow overview/start/pause/resume. No page errors occurred.
+- Standards and specification reviews. Route-presence coverage and transient dismissal/focus findings were corrected and rechecked.
+
+The T3 preview opened, but two snapshot attempts timed out. The browser checks used a separate local Chromium instance. They did not exercise native WebKit, real-project analysis, or clipboard/folder transports. Earlier real-project validation above remains historical evidence, not a new acceptance run for this reconciliation.
