@@ -17,7 +17,19 @@ const BEHAVIOR_BUDGET: usize = 36;
 impl GraphStore {
     /// Browse canonical local declarations with exact package/category filtering.
     pub fn browse(&self, kind: &str, package: &str, offset: usize) -> Result<crate::SymbolPage> {
-        if offset > 1_000_000
+        self.find_symbols("", kind, package, offset)
+    }
+
+    /// Search and filter the full index before counting and paging declarations.
+    pub fn find_symbols(
+        &self,
+        query: &str,
+        kind: &str,
+        package: &str,
+        offset: usize,
+    ) -> Result<crate::SymbolPage> {
+        if query.len() > 512
+            || offset > 1_000_000
             || package.len() > 2048
             || ![
                 "",
@@ -34,10 +46,20 @@ impl GraphStore {
         {
             return Err(Error::Invalid("invalid declaration browser request".into()));
         }
-        let total = self.connection.query_row("SELECT COUNT(*) FROM symbols WHERE local=1 AND (?1='' OR kind=?1) AND (?2='' OR package_id=?2)", params![kind,package], read_count)?;
-        let mut statement = self.connection.prepare("SELECT body FROM symbols WHERE local=1 AND (?1='' OR kind=?1) AND (?2='' OR package_id=?2) ORDER BY name,id LIMIT 40 OFFSET ?3")?;
+        let escaped = query
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        let pattern = format!("%{escaped}%");
+        let condition = "local=1 AND (?1='' OR kind=?1) AND (?2='' OR package_id=?2) AND (name LIKE ?3 ESCAPE '\\' OR qualified_name LIKE ?3 ESCAPE '\\')";
+        let total = self.connection.query_row(
+            &format!("SELECT COUNT(*) FROM symbols WHERE {condition}"),
+            params![kind, package, pattern],
+            read_count,
+        )?;
+        let mut statement = self.connection.prepare(&format!("SELECT body FROM symbols WHERE {condition} ORDER BY CASE WHEN name=?4 THEN 0 ELSE 1 END,name,id LIMIT 40 OFFSET ?5"))?;
         let symbols = statement
-            .query_map(params![kind, package, offset as i64], |r| {
+            .query_map(params![kind, package, pattern, query, offset as i64], |r| {
                 r.get::<_, String>(0)
             })?
             .map(|r| Ok(serde_json::from_str(&r?)?))

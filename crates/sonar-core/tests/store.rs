@@ -663,3 +663,52 @@ fn methods_question_filters_before_paging_and_counts_other_type_uses() {
     query.neighbor_kind = "unknown".into();
     assert!(store.graph(&query).is_err());
 }
+
+#[test]
+fn combined_discovery_counts_and_pages_after_all_filters() {
+    let dir = tempfile::tempdir().unwrap();
+    let names: Vec<String> = (0..85).map(|i| format!("Get{i:03}")).collect();
+    let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    let mut facts = package(dir.path(), "p", &refs, &[]);
+    for symbol in &mut facts.symbols {
+        symbol.kind = "method".into();
+        symbol.qualified_name = format!("p::Cache.{}", symbol.name);
+    }
+    let mut store = GraphStore::memory(dir.path()).unwrap();
+    store
+        .apply(&batch(
+            dir.path(),
+            vec![
+                facts,
+                package(dir.path(), "q", &["GetOther", "literal_%"], &[]),
+            ],
+            true,
+        ))
+        .unwrap();
+    let first = store.find_symbols("Cache.Get", "method", "p", 0).unwrap();
+    let second = store.find_symbols("Cache.Get", "method", "p", 40).unwrap();
+    let last = store.find_symbols("Cache.Get", "method", "p", 80).unwrap();
+    assert_eq!(first.total, 85);
+    assert_eq!(first.symbols.len(), 40);
+    assert_eq!(last.symbols.len(), 5);
+    assert_eq!(second.offset, 40);
+    let ids: HashSet<_> = first
+        .symbols
+        .iter()
+        .chain(&second.symbols)
+        .chain(&last.symbols)
+        .map(|symbol| &symbol.id)
+        .collect();
+    assert_eq!(ids.len(), 85);
+    assert_eq!(
+        store.find_symbols("Get", "function", "q", 0).unwrap().total,
+        1
+    );
+    assert_eq!(store.find_symbols("_%", "", "", 0).unwrap().total, 1);
+    assert_eq!(
+        store.find_symbols("Get", "method", "q", 0).unwrap().total,
+        0
+    );
+    assert!(store.find_symbols(&"x".repeat(513), "", "", 0).is_err());
+    assert!(store.find_symbols("", "", "", 1_000_001).is_err());
+}
