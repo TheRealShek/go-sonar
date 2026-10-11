@@ -69,6 +69,72 @@ pub struct RelationSites {
     pub offset: usize,
 }
 
+/// Semantic evidence identity, deliberately independent of operation IDs and source lines.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum EvidenceTarget {
+    Declaration {
+        symbol_id: String,
+    },
+    Operation {
+        function_id: String,
+        operation_kind: String,
+        expression: String,
+        access: Option<EvidenceAccess>,
+        connection: Option<EvidenceConnection>,
+    },
+    Connection {
+        source: String,
+        target: String,
+        relationship: String,
+        expression: String,
+    },
+}
+
+/// A chosen local access within an operation.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct EvidenceAccess {
+    pub name: String,
+    pub kind: String,
+    pub expression: String,
+}
+
+/// A relationship from an operation to another operation or declaration.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvidenceConnection {
+    pub kind: String,
+    pub label: String,
+    pub target_symbol_id: Option<String>,
+    pub target_kind: Option<String>,
+    pub target_expression: Option<String>,
+}
+
+/// At most one fresh graph item is returned; ambiguous occurrences require a new choice.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum EvidenceItem {
+    Node(Box<ViewNode>),
+    Edge(Box<Relation>),
+}
+
+/// Evidence resolved against a particular published snapshot.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvidenceResolution {
+    pub snapshot: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub item: Option<EvidenceItem>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<SourceSpan>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub problem: Option<String>,
+}
+
 /// A statement or branch inside a function.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

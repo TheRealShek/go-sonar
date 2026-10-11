@@ -6,7 +6,7 @@ For installation and startup, see [Run locally](../README.md#run-locally).
 
 ## Open a project
 
-Enter the absolute path to a directory containing `go.mod` and open it. **Choose folder** fills the path; you still need to open the selected directory. **Recent projects** lets you reuse a previously opened path.
+Choose **Open folder**, select a directory containing `go.mod`, and analysis starts immediately. Choosing a **Recent project** also opens it immediately. You can instead enter an absolute path and choose **Open**. The empty canvas offers **Open folder** directly.
 
 Select an individual module, rather than a workspace root containing only `go.work`. Dependencies and the required Go toolchain must already be available locally. Analysis will report missing dependencies instead of downloading them.
 
@@ -14,9 +14,9 @@ After loading, review the coverage summary and diagnostics. A graph with results
 
 ## Choose a starting point
 
-Search by a declaration name, such as `Get`, or use **Browse packages and declarations** to narrow results by package and kind. Executable modules can offer discovered `main` functions as starting points. Libraries can start at a type, method, field, or any other indexed declaration.
+Use **Find any symbol** to search by declaration name, such as `Get`, and narrow the same result list by package and kind. Methods include their receiver, such as `Cache.Get`. The list shows the total match count and offers pages of results. Arrow keys choose a result and Enter opens it. With an empty query, executable modules offer entry points; libraries offer package and type starting points.
 
-The initial relationship choices depend on the symbol. Functions start with outgoing calls, fields with incoming reads and writes, and types with incoming construction and type-related uses. The initial neighbor budget is eight connections. Existing exploration preferences can carry over when you refocus.
+The initial relationship choices depend on the symbol. Functions start with outgoing calls, fields with incoming reads and writes, and types with incoming construction and type-related uses. The initial neighbor budget is eight connections. Preferences carry over within the same declaration category when you refocus.
 
 ## Explore relationships
 
@@ -78,13 +78,13 @@ Interface and dynamic calls do not offer a proven concrete implementation to ent
 
 Call details show the receiver, argument expressions mapped to parameters, and returned positions mapped to destinations where analysis supplies them. An assignment such as `record = store.Normalize(record)` maps the argument and destination; it does not prove how the callee uses the value.
 
-Operation details can show field accesses, mutations, and local binding occurrences. **Inspect known readers and writers** opens the field's broader relationships. **Inspect this local binding** shows available occurrences for the binding. These facts do not establish complete alias tracking or value dependence across functions.
+Operation details can show field accesses, mutations, and local binding occurrences. **Inspect known readers and writers** opens the field's broader relationships. **Inspect this local binding** pins the occurrence list until you dismiss it. Selecting another occurrence keeps the investigation open. The list shows 20 sites per page and retains at most the 200 most recently seen sites. Reveal an older region again to reacquire discarded sites. These facts do not establish complete alias tracking or value dependence across functions.
 
 ## Inspect source evidence
 
-Select a node or connection, then choose **Open source evidence**. For a grouped connection, select an individual source site; use **Previous sites** and **More sites** to inspect additional occurrences.
+Select a node or connection and choose **Inspect** to open the inspector. Its Source section automatically loads the selected evidence. Selection updates an already-open inspector without reopening a closed one. For a grouped connection, select an individual source site; use **Previous sites** and **More sites** to inspect additional occurrences. **Copy location** copies the file, line, and column. Revealing graph regions preserves the current excerpt and its scroll position.
 
-The source inspector reads bounded excerpts inside the selected module. It rejects a file that changed since the analyzed snapshot. Refresh before retrying an excerpt after an edit.
+The source inspector reads bounded, syntax-highlighted excerpts inside the selected module. It rejects a file that changed since the analyzed snapshot. Use **Retry source** for a temporary loading failure or **Refresh and reopen source** after an edit. Recovery resolves the declaration or chosen occurrence against the new analysis, including its new line coordinates. If an occurrence changed, disappeared, or matches several current occurrences, select the intended occurrence again. Recovery does not guess a location or substitute the focused declaration.
 
 External declarations may have signatures and package information without readable declaration source. Inspect a local call site when the declaration is outside the project. Opening an external editor is not implemented.
 
@@ -102,7 +102,9 @@ Syntax and type errors can make the snapshot incomplete and remove affected stal
 
 ## Keyboard inspection
 
-Use Tab to reach the controls and **Inspect the graph with the keyboard** to select a visible operation, symbol, or connection. The inspector exposes the corresponding actions and evidence. Escape dismisses identity details and the inspection selection. Use **Close inspector** to close the panel.
+Use Tab to reach the controls and **Inspect the graph with the keyboard** to select a visible operation, symbol, or connection. The inspector exposes the corresponding actions and evidence. Escape closes the topmost transient panel or popover, restores focus to its invoking control, and preserves the selected graph item. **Close inspector** also preserves selection.
+
+Use Ctrl/Cmd+K or `/` to focus search, `i` to inspect the selected item, `[` for the previous flow step, and `]` for the next unambiguous flow step. Choose a branch explicitly when more than one continuation is available. These shortcuts do not override typing in input controls.
 
 Keyboard controls exist in the current source. Full keyboard usability remains a proposed acceptance check, not a completed accessibility audit.
 

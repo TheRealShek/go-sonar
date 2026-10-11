@@ -42,6 +42,14 @@ export function selectionConnections(view: GraphView | undefined, selectedId?: s
   return { edges, endpoints };
 }
 
+// Return comparison describes the whole route, even though its return node is selected.
+export function graphEmphasis(
+  selection: { edges: Set<string>; endpoints: Set<string> },
+  outcome?: { edges: Set<string>; nodes: Set<string> },
+) {
+  return outcome ? { edges: outcome.edges, endpoints: outcome.nodes } : selection;
+}
+
 export function GraphLegend({ view }: { view: GraphView }) {
   const kinds = [...new Set(view.edges.map((edge) => edge.kind))];
   const behavior = !!view.behaviors?.length;

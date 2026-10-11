@@ -204,4 +204,17 @@ impl Backend {
             &fingerprint,
         )
     }
+
+    /// Reacquire one source occurrence from the requested published snapshot.
+    pub fn resolve_source(
+        &self,
+        target: &crate::EvidenceTarget,
+        snapshot: &str,
+    ) -> Result<crate::EvidenceResolution> {
+        let store = self.store.lock().map_err(|_| Error::State)?;
+        store
+            .as_ref()
+            .ok_or(Error::NoProject)?
+            .resolve_source(target, snapshot)
+    }
 }

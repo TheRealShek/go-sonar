@@ -2,6 +2,14 @@ import { useEffect, useState } from 'react';
 import { backend } from './backend';
 import { SourcePanel } from './SourcePanel';
 import { sourceKey } from './source';
+import {
+  retainBindingSites,
+  bindingPage,
+  BINDING_CACHE_LIMIT,
+  BINDING_PAGE_SIZE,
+  type BindingCache,
+  type BindingOccurrence,
+} from './binding';
 import { formatSource } from './GraphCards';
 import { symbolName, nodeName } from './identity';
 import type {
@@ -67,7 +75,7 @@ export function EvidenceInspector({
   binding?: Access;
   onBinding: (access: Access) => void;
   onDismissBinding: () => void;
-  onOccurrence: (node: ViewNode, span: SourceSpan) => void;
+  onOccurrence: (site: BindingOccurrence) => void;
   callDepth: number;
   onFocus: (id: string, kind?: string) => void;
   onUsage: (id: string) => void;
@@ -76,7 +84,7 @@ export function EvidenceInspector({
   onFollow: (id: string) => void;
   onReveal: (node: ViewNode) => void;
   onSelect: (value: ViewNode | ViewEdge) => void;
-  onSource: (span: SourceSpan) => void;
+  onSource: (span: SourceSpan, expression?: string) => void;
   onImpact: (id: string, category: string) => void;
   onPage: (direction: 'previous' | 'next') => void;
   onShow: (node: ViewNode) => void;
@@ -132,32 +140,23 @@ export function EvidenceInspector({
       ? view?.edges.filter((edge) => edge.target === node.id && edge.kind === 'calls')
       : [];
   const call = node?.details?.call;
-  const [knownSites, setKnownSites] = useState<{
-    snapshot?: string;
-    sites: { node: ViewNode; access: Access }[];
-  }>({ sites: [] });
+  const [knownSites, setKnownSites] = useState<BindingCache>({ sites: [], evicted: false });
+  const [bindingOffset, setBindingOffset] = useState(0);
+  useEffect(() => {
+    setBindingOffset(0);
+  }, [binding?.id, view?.snapshot]);
   useEffect(() => {
     if (!binding) {
-      setKnownSites({ sites: [] });
+      setKnownSites({ sites: [], evicted: false });
       return;
     }
-    if (!view) return;
-    setKnownSites((previous) => {
-      const sites = new Map<string, { node: ViewNode; access: Access }>();
-      const candidates = view.nodes.flatMap((node) =>
-        (node.details?.accesses ?? []).map((access) => ({ node, access })),
-      );
-      for (const site of [
-        ...(previous.snapshot === view.snapshot ? previous.sites : []),
-        ...candidates,
-      ]) {
-        if (site.access.id === binding.id)
-          sites.set(`${site.node.id}:${site.access.kind}:${sourceKey(site.access.source)}`, site);
-      }
-      return { snapshot: view.snapshot, sites: [...sites.values()] };
-    });
+    if (view) setKnownSites((previous) => retainBindingSites(previous, binding.id, view));
   }, [binding?.id, view?.snapshot, view?.nodes]);
-  const localSites = knownSites.sites.filter((site) => site.access.id === binding?.id);
+  const cache =
+    knownSites.bindingId === binding?.id && knownSites.snapshot === view?.snapshot
+      ? knownSites
+      : { sites: [], evicted: false };
+  const localSites = bindingPage(cache, bindingOffset);
   const sourceContent = (
     <>
       {source && <p className="source-location">{formatSource(source)}</p>}
@@ -265,19 +264,46 @@ export function EvidenceInspector({
             Known sites from revealed regions. Declaration identity separates shadowed variables;
             hidden regions and aliases may contain other uses.
           </p>
-          {localSites.map(({ node, access }, index) => (
+          {localSites.sites.map((site) => (
             <button
               className="match"
-              key={`${node.id}:${index}`}
-              onClick={() => {
-                onOccurrence(node, access.source);
-              }}
+              key={`${site.nodeId}:${site.access.kind}:${sourceKey(site.access.source)}`}
+              disabled={busy}
+              onClick={() => onOccurrence(site)}
             >
-              {access.kind} · {access.expression} · line {access.source.line}
-              {!view?.nodes.some((visible) => visible.id === node.id) && ' · reveal occurrence'}
+              {site.access.kind} · {site.access.expression} · line {site.access.source.line}
+              {!view?.nodes.some((visible) => visible.id === site.nodeId) && ' · reveal occurrence'}
             </button>
           ))}
-          {!localSites.length && (
+          {!!cache.sites.length && (
+            <>
+              <p>
+                {localSites.offset + 1}–{localSites.offset + localSites.sites.length} of{' '}
+                {cache.sites.length} cached occurrences
+              </p>
+              <div className="actions">
+                <button
+                  disabled={!localSites.offset}
+                  onClick={() => setBindingOffset(localSites.offset - BINDING_PAGE_SIZE)}
+                >
+                  Previous occurrences
+                </button>
+                <button
+                  disabled={localSites.offset + localSites.sites.length >= cache.sites.length}
+                  onClick={() => setBindingOffset(localSites.offset + BINDING_PAGE_SIZE)}
+                >
+                  More occurrences
+                </button>
+              </div>
+            </>
+          )}
+          {cache.evicted && (
+            <p className="notice">
+              Keeping the {BINDING_CACHE_LIMIT} most recently seen sites. Older sites were
+              discarded; reveal their regions again to inspect them.
+            </p>
+          )}
+          {!localSites.sites.length && (
             <p>
               No occurrences in this view. Return to the binding's function or reveal more regions.
             </p>
@@ -545,7 +571,7 @@ export function EvidenceInspector({
                         className="match"
                         key={site.id}
                         disabled={sitesBusy}
-                        onClick={() => onSource(site.evidence)}
+                        onClick={() => onSource(site.evidence, site.expression)}
                       >
                         <code>{site.expression}</code>
                         <small>{formatSource(site.evidence)}</small>

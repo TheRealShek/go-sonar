@@ -13,12 +13,20 @@ import {
 import { backend, isDesktop, chooseProjectFolder } from './backend';
 import { nodeTypes, IdentityCard, type SymbolNode } from './GraphCards';
 import { FlowNavigator, BranchHistory } from './FlowNavigator';
-import { GraphLegend, edgeLabel, relationshipColors, selectionConnections } from './GraphEdges';
+import {
+  GraphLegend,
+  edgeLabel,
+  relationshipColors,
+  selectionConnections,
+  graphEmphasis,
+} from './GraphEdges';
+import { evidenceTarget } from './source';
 import { symbolName, operationName, nodeName } from './identity';
 import { EvidenceInspector } from './EvidenceInspector';
 import { ConnectionSummary } from './ConnectionSummary';
 import { DiscoveryBrowser } from './DiscoveryBrowser';
 import { coverageLabel, isEditing, trapFocus } from './feedback';
+import type { BindingOccurrence } from './binding';
 import {
   canEnterCall,
   boundRequest,
@@ -57,6 +65,8 @@ import type {
   SymbolFact,
   ViewNode,
   ViewEdge,
+  EvidenceTarget,
+  EvidenceResolution,
 } from './shared/protocol';
 import {
   LatestRequest,
@@ -136,7 +146,9 @@ export default function App() {
   const [binding, setBinding] = useState<Access>();
   const sourceOwner = useRef<{ id?: string; snapshot?: string } | undefined>(undefined);
   const keepSourceOnReveal = useRef<{ id?: string; snapshot?: string } | undefined>(undefined);
-  const reopenSource = useRef<{ id: string; span: SourceSpan } | undefined>(undefined);
+  const sourceTarget = useRef<EvidenceTarget | undefined>(undefined);
+  const reopenSource = useRef<EvidenceResolution | undefined>(undefined);
+  const sourceRecoveryBlocked = useRef(false);
   const [recents, setRecents] = useState(recentPaths);
   const [wideSource, setWideSource] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -285,8 +297,11 @@ export default function App() {
     navigate(requestFor(id, nextKind, preferences.current[categoryFor(nextKind)]));
   };
 
-  const loadProject = async (refresh = false, path = root) => {
+  const loadProject = async (refresh = false, path = root, recoverSource = false) => {
     const current = projectLatest.current.next();
+    const target = recoverSource ? sourceTarget.current : undefined;
+    sourceRecoveryBlocked.current = recoverSource;
+    reopenSource.current = undefined;
     const previousFrame = capture();
     latest.current.invalidate();
     sourceLatest.current.invalidate();
@@ -322,6 +337,28 @@ export default function App() {
       const summary = await (refresh ? backend.refresh() : backend.open(path));
       if (!current()) return;
 
+      if (recoverSource) {
+        setSourceLoading(true);
+        try {
+          const resolution = target
+            ? await backend.resolveSource(target, summary.snapshot)
+            : {
+                snapshot: summary.snapshot,
+                problem:
+                  'Select the current occurrence in the graph to reopen source. This collapsed region cannot be identified after an edit.',
+              };
+          if (!current()) return;
+          reopenSource.current = resolution.item && resolution.source ? resolution : undefined;
+          setSourceError(resolution.problem ?? '');
+        } catch (error) {
+          if (!current()) return;
+          setSourceError(
+            `Could not restore this occurrence: ${String(error)}. Select its current occurrence in the graph to reopen source.`,
+          );
+        } finally {
+          if (current()) setSourceLoading(false);
+        }
+      }
       setProject(summary);
       if (!refresh || summary.snapshot !== project?.snapshot) setBinding(undefined);
       if (isDesktop) {
@@ -339,7 +376,23 @@ export default function App() {
           project?.snapshot,
           summary.snapshot,
         );
-        setRequest({ ...navigation.request! });
+        let nextRequest = { ...navigation.request! };
+        const recovery = reopenSource.current;
+        if (recovery?.item) {
+          const item = recovery.item;
+          const functionId = target?.kind === 'operation' ? target.functionId : undefined;
+          const operationId = 'name' in item ? item.id : item.source;
+          nextRequest = functionId
+            ? {
+                ...nextRequest,
+                focus: functionId,
+                internals: [...new Set([...nextRequest.internals, functionId])],
+                behaviorAnchors: { ...nextRequest.behaviorAnchors, [functionId]: operationId },
+              }
+            : { ...nextRequest, focus: 'name' in item ? item.id : item.source };
+          pendingSelection.current = item.id;
+        }
+        setRequest(nextRequest);
         setHistory(navigation.history);
         setFuture(navigation.future);
         setTrail(navigation.trail);
@@ -353,7 +406,11 @@ export default function App() {
           setNavigationNotice(
             'Analysis changed. Saved paths, call frames, and history were cleared. Start following from the current symbol.',
           );
-        } else if (previousFrame) restored.current = previousFrame;
+        } else if (previousFrame)
+          restored.current = {
+            ...previousFrame,
+            selectedId: reopenSource.current?.item?.id ?? previousFrame.selectedId,
+          };
       } else {
         positions.current.clear();
         setHistory([]);
@@ -544,9 +601,23 @@ export default function App() {
           result.nodes.find((node) => node.id === result.focus)?.kind ?? 'function';
         setSelected((previous) => {
           const id = selectedId ?? (initialNavigation ? result.focus : previous?.id);
-          const item =
+          let item =
             result.nodes.find((node) => node.id === id) ??
             result.edges.find((edge) => edge.id === id);
+          const recovery = reopenSource.current;
+          if (recovery?.snapshot === result.snapshot && recovery.item) {
+            const recovered = recovery.item;
+            item =
+              'name' in recovered
+                ? (result.nodes.find((node) => node.id === recovered.id) ?? recovered)
+                : (result.edges.find(
+                    (edge) =>
+                      edge.source === recovered.source &&
+                      edge.target === recovered.target &&
+                      edge.kind === recovered.kind &&
+                      (edge.kind !== 'control' || edge.label === recovered.label),
+                  ) ?? recovered);
+          }
           preserveRevealSource(item);
           return item;
         });
@@ -718,7 +789,7 @@ export default function App() {
     ? view?.summaries.find((summary) => summary.nodeId === selectedNode.id)
     : undefined;
 
-  const inspect = useCallback(
+  const loadSource = useCallback(
     async (span: SourceSpan) => {
       const current = sourceLatest.current.next();
       sourceOwner.current = {
@@ -749,6 +820,20 @@ export default function App() {
     [project?.root, project?.snapshot],
   );
 
+  const inspect = useCallback(
+    (span: SourceSpan, occurrenceExpression?: string) => {
+      sourceRecoveryBlocked.current = false;
+      sourceTarget.current = evidenceTarget(
+        selectedRef.current,
+        span,
+        viewRef.current,
+        occurrenceExpression,
+      );
+      return loadSource(span);
+    },
+    [loadSource],
+  );
+
   useEffect(() => {
     if (
       !inspectorOpen ||
@@ -758,23 +843,30 @@ export default function App() {
       benchmarking.current
     )
       return;
+    const pending = reopenSource.current;
+    if (sourceRecoveryBlocked.current && !pending) return;
     if (
       sourceOwner.current?.id === selected.id &&
       sourceOwner.current.snapshot === project.snapshot
     )
       return;
-    const pending = reopenSource.current;
     reopenSource.current = undefined;
     const span =
-      pending?.id === selected.id
-        ? pending.span
+      pending?.snapshot === project.snapshot && pending.source
+        ? pending.source
         : 'name' in selected
           ? selected.source
           : selected.evidence;
-    void inspect(span);
-  }, [selected?.id, project?.snapshot, view?.snapshot, inspectorOpen, inspect]);
+    void inspect(
+      span,
+      pending?.item && 'evidence' in pending.item ? pending.item.expression : undefined,
+    );
+  }, [selected?.id, project?.snapshot, view?.snapshot, inspectorOpen, sourceError, inspect]);
 
   const select = (value: ViewNode | ViewEdge) => {
+    if (sourceRecoveryBlocked.current) setSourceError('');
+    sourceRecoveryBlocked.current = false;
+    reopenSource.current = undefined;
     selectedRef.current = value;
     setSelected(value);
     setPinned(true);
@@ -835,7 +927,25 @@ export default function App() {
       void flow.current.setViewport(next, { duration: 0 });
   };
 
-  const inspectOccurrence = (node: ViewNode, span: SourceSpan) => {
+  const inspectOccurrence = (site: BindingOccurrence) => {
+    const node: ViewNode = view?.nodes.find((node) => node.id === site.nodeId) ?? {
+      id: site.nodeId,
+      parentId: site.functionId,
+      kind: site.nodeKind,
+      name: site.operationExpression,
+      qualifiedName: site.functionId,
+      packageId: '',
+      signature: '',
+      documentation: '',
+      source: site.operationSource,
+      details: {
+        role: '',
+        expression: site.operationExpression,
+        explanation: 'Previously revealed source operation.',
+        accesses: [{ ...site.access, id: binding?.id ?? '' }],
+      },
+    };
+    const span = site.access.source;
     select(node);
     void inspect(span);
     if (view?.nodes.some((visible) => visible.id === node.id)) {
@@ -1147,6 +1257,7 @@ export default function App() {
     (summary) => summary.nodeId === connectionNode?.id,
   );
   const connected = selectionConnections(view, selected?.id);
+  const emphasized = graphEmphasis(connected, comparedPaths);
 
   const breadcrumbs = explorationBreadcrumbs(history, request?.focus);
   const collapseTarget = selectedNode?.parentId ?? selectedNode?.id;
@@ -1619,7 +1730,7 @@ export default function App() {
                 return {
                   ...node,
                   selected: selected?.id === node.id,
-                  className: `${node.data.newlyRevealed ? 'newly-revealed' : ''} ${connected.endpoints.has(node.id) ? 'connected-endpoint' : ''} ${activeOperation === node.id ? 'current-operation' : ''} ${paths && node.parentId && !paths.nodes.has(node.id) && !connected.endpoints.has(node.id) ? 'dimmed' : ''}`,
+                  className: `${node.data.newlyRevealed ? 'newly-revealed' : ''} ${emphasized.endpoints.has(node.id) ? 'connected-endpoint' : ''} ${activeOperation === node.id ? 'current-operation' : ''} ${paths && node.parentId && !paths.nodes.has(node.id) && !emphasized.endpoints.has(node.id) ? 'dimmed' : ''}`,
                 };
               })}
               edges={edges.map((edge) => {
@@ -1628,7 +1739,7 @@ export default function App() {
                 return {
                   ...edge,
                   selected: selected?.id === edge.id,
-                  className: `${selected ? (connected.edges.has(edge.id) ? 'connected-relationship' : 'dimmed') : paths && !paths.edges.has(edge.id) ? 'dimmed' : ''} ${view?.edges.some((candidate) => candidate.id === edge.id && candidate.source === current && candidate.kind === 'control') ? 'next-operation' : ''}`,
+                  className: `${paths || selected ? (emphasized.edges.has(edge.id) ? 'connected-relationship' : 'dimmed') : ''} ${!paths && view?.edges.some((candidate) => candidate.id === edge.id && candidate.source === current && candidate.kind === 'control') ? 'next-operation' : ''}`,
                 };
               })}
               nodeTypes={nodeTypes}
@@ -1793,11 +1904,10 @@ export default function App() {
             sourceLoading={sourceLoading}
             sourceError={sourceError}
             onRetrySource={() => {
-              if (evidence) void inspect(evidence);
+              if (evidence) void loadSource(evidence);
             }}
             onRefreshSource={() => {
-              if (evidence && selected) reopenSource.current = { id: selected.id, span: evidence };
-              void loadProject(true);
+              void loadProject(true, root, true);
             }}
             binding={binding}
             onBinding={setBinding}
@@ -1817,7 +1927,7 @@ export default function App() {
             }}
             onReveal={reveal}
             onSelect={select}
-            onSource={(span) => void inspect(span)}
+            onSource={(span, expression) => void inspect(span, expression)}
             onImpact={(id, category) => {
               if (request) {
                 navigate({ ...request, focus: id });

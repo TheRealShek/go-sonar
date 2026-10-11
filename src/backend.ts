@@ -9,6 +9,8 @@ import type {
   RelationSites,
   Discovery,
   SymbolPage,
+  EvidenceTarget,
+  EvidenceResolution,
 } from './shared/protocol';
 import { sampleBackend } from './sample';
 import { QueryQueue } from './requests';
@@ -31,6 +33,7 @@ export interface Backend {
   ): Promise<RelationSites>;
   graph(request: GraphRequest): Promise<GraphView>;
   source(source: SourceSpan): Promise<SourceExcerpt>;
+  resolveSource(target: EvidenceTarget, snapshot: string): Promise<EvidenceResolution>;
   impact(symbolId: string, category: string): Promise<GraphView>;
 }
 
@@ -48,6 +51,7 @@ const transport: Backend = isDesktop
         invoke('relation_sites', { source, target, kind, offset }),
       graph: (request) => invoke('graph_view', { request }),
       source: (source) => invoke('source_excerpt', { source }),
+      resolveSource: (target, snapshot) => invoke('resolve_source', { target, snapshot }),
       impact: (symbolId, category) => invoke('impact_view', { symbolId, category, limit: 80 }),
     }
   : sampleBackend;
@@ -56,10 +60,13 @@ const views = new QueryQueue<GraphView>();
 const searches = new QueryQueue<SymbolFact[]>();
 const discoveries = new QueryQueue<SymbolPage>();
 const sources = new QueryQueue<SourceExcerpt>();
+const sourceResolutions = new QueryQueue<EvidenceResolution>();
 
 export const backend: Backend = {
   ...transport,
   source: (span) => sources.execute(() => transport.source(span)),
+  resolveSource: (target, snapshot) =>
+    sourceResolutions.execute(() => transport.resolveSource(target, snapshot)),
   graph: (request) => views.execute(() => transport.graph(request)),
   impact: (symbolId, category) => views.execute(() => transport.impact(symbolId, category)),
   search: (query) => searches.execute(() => transport.search(query)),

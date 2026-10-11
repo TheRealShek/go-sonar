@@ -619,7 +619,7 @@ impl GraphStore {
 }
 
 /// Retain the expression and source facts separately from declaration identity.
-fn behavior_node(parent: &ViewNode, node: &BehaviorNode) -> ViewNode {
+pub(super) fn behavior_node(parent: &ViewNode, node: &BehaviorNode) -> ViewNode {
     ViewNode {
         id: node.id.clone(),
         name: node.label.clone(),

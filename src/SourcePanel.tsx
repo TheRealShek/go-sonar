@@ -69,7 +69,7 @@ export function SourcePanel({
         <div role="alert">
           <p>{error}</p>
           <div className="actions">
-            <button onClick={onRetry}>Retry source</button>
+            {evidence && <button onClick={onRetry}>Retry source</button>}
             <button onClick={onRefresh}>Refresh and reopen source</button>
           </div>
         </div>

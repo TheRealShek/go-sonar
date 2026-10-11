@@ -447,6 +447,43 @@ const summary = {
 export const sampleBackend: Backend = {
   open: async () => summary,
   refresh: async () => summary,
+  resolveSource: async (target, snapshot) => {
+    if (snapshot !== summary.snapshot) throw new Error('Analysis changed while restoring source');
+    // This immutable illustrative fixture has no edited snapshots to reconcile.
+    const item =
+      target.kind === 'declaration'
+        ? symbols.find((node) => node.id === target.symbolId)
+        : target.kind === 'connection'
+          ? relations.find(
+              (edge) =>
+                edge.source === target.source &&
+                edge.target === target.target &&
+                edge.kind === target.relationship &&
+                edge.expression === target.expression,
+            )
+          : internals.find(
+              (node) =>
+                node.parentId === target.functionId &&
+                node.kind === target.operationKind &&
+                (node.details?.expression || node.name) === target.expression,
+            );
+    if (!item || (target.kind === 'operation' && target.connection))
+      return { snapshot, problem: 'Select the intended occurrence in the graph to reopen source.' };
+    const access =
+      target.kind === 'operation' && target.access && 'name' in item
+        ? item.details?.accesses?.find(
+            (access) =>
+              access.name === target.access!.name &&
+              access.kind === target.access!.kind &&
+              access.expression === target.access!.expression,
+          )
+        : undefined;
+    return {
+      snapshot,
+      item,
+      source: access?.source ?? ('name' in item ? item.source : item.evidence),
+    };
+  },
   search: async (query) =>
     symbols
       .filter((node) =>

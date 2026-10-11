@@ -159,6 +159,19 @@ async fn browse_symbols(
 }
 
 #[tauri::command]
+async fn resolve_source(
+    state: State<'_>,
+    target: sonar_core::EvidenceTarget,
+    snapshot: String,
+) -> Result<sonar_core::EvidenceResolution, String> {
+    let backend = Arc::clone(state.inner());
+    tauri::async_runtime::spawn_blocking(move || backend.resolve_source(&target, &snapshot))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn find_symbols(
     state: State<'_>,
     query: String,
@@ -281,6 +294,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             graph_view,
             impact_view,
             source_excerpt,
+            resolve_source,
             benchmark_config,
             benchmark_report
         ])
