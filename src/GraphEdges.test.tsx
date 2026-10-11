@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { edgeLabel, GraphLegend, selectionConnections, graphEmphasis } from './GraphEdges';
+import {
+  edgeLabel,
+  GraphLegend,
+  selectionConnections,
+  graphEmphasis,
+  routedPath,
+} from './GraphEdges';
 import { outcomePaths } from './navigation';
 import { sampleBackend } from './sample';
 import { requestFor } from './exploration';
@@ -58,5 +64,35 @@ describe('relationship presentation', () => {
     expect(adjacent.endpoints.has('store')).toBe(false);
     expect(selectionConnections(undefined, 'error').edges.size).toBe(0);
     expect(selectionConnections(view).endpoints.size).toBe(0);
+  });
+});
+
+describe('rounded routed paths', () => {
+  it('rounds bends while keeping endpoints and straight Flow segments', () => {
+    const points = [
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 100, y: 80 },
+    ];
+    expect(routedPath(points)).toBe('M 0 0 L 88 0 Q 100 0 100 12 L 100 80');
+    expect(routedPath(points, 0)).toBe('M 0 0 L 100 0 L 100 80');
+  });
+  it('bounds rounding on short segments and handles duplicate and collinear points', () => {
+    expect(
+      routedPath([
+        { x: 0, y: 0 },
+        { x: 4, y: 0 },
+        { x: 4, y: 6 },
+      ]),
+    ).toBe('M 0 0 L 2 0 Q 4 0 4 2 L 4 6');
+    expect(
+      routedPath([
+        { x: 0, y: 0 },
+        { x: 0, y: 0 },
+        { x: 20, y: 0 },
+        { x: 40, y: 0 },
+      ]),
+    ).toBe('M 0 0 L 20 0 L 40 0');
+    expect(routedPath([])).toBe('');
   });
 });

@@ -153,6 +153,8 @@ export default function App() {
   const [recents, setRecents] = useState(recentPaths);
   const [explorerOpen, setExplorerOpen] = useState(true);
   const [projectMenuOpen, setProjectMenuOpen] = useState(true);
+  const [coverageOpen, setCoverageOpen] = useState(false);
+  const coverageMenu = useRef<HTMLDetailsElement>(null);
   const projectMenu = useRef<HTMLDetailsElement>(null);
   const explorerInvoker = useRef<HTMLElement | null>(null);
   const explorerToggle = useRef<HTMLButtonElement>(null);
@@ -212,6 +214,7 @@ export default function App() {
     identity: 0,
     reset: 0,
     project: 0,
+    coverage: 0,
     explorer: 0,
   });
   const framedFocus = useRef<string | undefined>(undefined);
@@ -588,7 +591,7 @@ export default function App() {
             label: edgeLabel(edge),
             ariaLabel: `${nodeName(result.nodes, edge.source)} to ${nodeName(result.nodes, edge.target)}: ${edgeLabel(edge)}`,
             type: 'routed',
-            data: { route: geometry.routes[edge.id], curved: grouped.size === 0 },
+            data: { route: geometry.routes[edge.id], rounded: grouped.size === 0 },
             className: edge.kind === 'control' ? 'control-edge' : 'dependency-edge',
             sourceHandle:
               edge.kind !== 'control' &&
@@ -1215,6 +1218,7 @@ export default function App() {
       if (event.key === 'Escape') {
         const layers = [
           { name: 'project', visible: projectMenuOpen, order: transientOrder.current.project },
+          { name: 'coverage', visible: coverageOpen, order: transientOrder.current.coverage },
           {
             name: 'explorer',
             visible: explorerOpen && window.matchMedia('(max-width: 750px)').matches,
@@ -1231,7 +1235,10 @@ export default function App() {
           .filter((layer) => layer.visible)
           .sort((left, right) => right.order - left.order);
         const top = layers[0]?.name;
-        if (top === 'project') {
+        if (top === 'coverage') {
+          setCoverageOpen(false);
+          restoreFocus(coverageMenu.current?.querySelector('summary') ?? null);
+        } else if (top === 'project') {
           if (projectMenu.current) projectMenu.current.open = false;
           setProjectMenuOpen(false);
           restoreFocus(projectMenu.current?.querySelector('summary') ?? null);
@@ -1356,7 +1363,6 @@ export default function App() {
       <header>
         <div>
           <strong>Go Sonar</strong>
-          <span>Local Go code explorer</span>
         </div>
         {!isDesktop && <b className="sample-banner">SAMPLE PREVIEW · no local analysis</b>}
         <details className="project-menu" ref={projectMenu} open={projectMenuOpen}>
@@ -1424,6 +1430,51 @@ export default function App() {
         <button disabled={!project || busy} onClick={() => void loadProject(true)}>
           Refresh
         </button>
+        <details className="project-info" ref={coverageMenu} open={coverageOpen}>
+          <summary
+            title={project ? coverageLabel(project.diagnostics) : 'Analysis coverage'}
+            onClick={(event) => {
+              event.preventDefault();
+              if (!coverageOpen)
+                transientOrder.current.coverage = ++transientOrder.current.sequence;
+              setCoverageOpen(!coverageOpen);
+            }}
+          >
+            Coverage{project?.diagnostics.length ? ` · ${project.diagnostics.length}` : ''}
+          </summary>
+          <div className="project-popover">
+            {project && (
+              <>
+                <p className="muted">
+                  {project.symbolCount} symbols · {project.relationCount} relations
+                </p>
+                <p className="muted">
+                  Snapshot {project.snapshot.slice(0, 12)}
+                  <br />
+                  {project.stats.analyzedPackages} packages analyzed ·{' '}
+                  {project.stats.reusedPackages} reused · {project.stats.changedFiles} files changed
+                  · {Math.round(project.stats.durationMs)} ms
+                </p>
+              </>
+            )}
+            {project?.diagnostics.length ? (
+              <details className="diagnostics">
+                <summary>{coverageLabel(project.diagnostics)}</summary>
+                {project.diagnostics.map((diagnostic, index) => (
+                  <p key={index}>
+                    {diagnostic.severity}: {diagnostic.message}{' '}
+                    {diagnostic.packageId && `(${diagnostic.packageId})`}
+                  </p>
+                ))}
+              </details>
+            ) : project ? (
+              <p className="coverage">
+                Analysis completed without package errors. Static evidence cannot establish runtime
+                execution or resolve every dynamic target.
+              </p>
+            ) : null}{' '}
+          </div>
+        </details>
       </header>
       <div className="workspace">
         <aside className="explorer" hidden={!explorerOpen}>
@@ -1437,20 +1488,6 @@ export default function App() {
             Shortcuts: Ctrl/Cmd+K or / search · I inspect · [ previous step · ] next step
           </p>
           <h2>{project?.name ?? 'Start an exploration'}</h2>
-          {project && (
-            <>
-              <p className="muted">
-                {project.symbolCount} symbols · {project.relationCount} relations
-              </p>
-              <p className="muted">
-                Snapshot {project.snapshot.slice(0, 12)}
-                <br />
-                {project.stats.analyzedPackages} packages analyzed · {project.stats.reusedPackages}{' '}
-                reused · {project.stats.changedFiles} files changed ·{' '}
-                {Math.round(project.stats.durationMs)} ms
-              </p>
-            </>
-          )}
           <DiscoveryBrowser
             key={project ? `${project.root}:${project.snapshot}` : 'empty'}
             enabled={!!project && !benchmarking.current}
@@ -1458,51 +1495,6 @@ export default function App() {
             onFocus={focusSymbol}
             onResults={setMatches}
           />
-          <h3>Explore a question</h3>
-          <div className="questions" aria-label="Exploration questions">
-            {QUESTIONS[focusCategory].map((question) => (
-              <button
-                key={question.label}
-                disabled={!request || busy || !!impact}
-                aria-pressed={
-                  !!request &&
-                  !behaviorOpen &&
-                  request.direction === question.direction &&
-                  request.neighborKind === question.neighborKind &&
-                  request.kinds.length === question.kinds.length &&
-                  question.kinds.every((kind) => request.kinds.includes(kind))
-                }
-                onClick={() => {
-                  if (trail) setTrail({ ...trail, paused: true });
-                  setOutcomeId(undefined);
-                  change(
-                    {
-                      kinds: question.kinds,
-                      direction: question.direction,
-                      neighborKind: question.neighborKind,
-                      groups: {},
-                      internals: [],
-                    },
-                    true,
-                  );
-                }}
-              >
-                {question.label}
-              </button>
-            ))}
-            {focusCategory === 'function' && (
-              <button
-                disabled={!request || busy || !!impact}
-                aria-pressed={behaviorOpen}
-                onClick={() => openBehavior(request!.focus)}
-              >
-                Flow
-              </button>
-            )}
-          </div>
-          {request?.neighborKind && (
-            <p className="muted">Methods using this type, including receiver and signature uses.</p>
-          )}
           <details>
             <summary>Filters</summary>
             {RELATIONS.map((kind) => (
@@ -1553,6 +1545,52 @@ export default function App() {
             >
               Symbols
             </button>
+            <div className="graph-modes" aria-label="Exploration questions">
+              {QUESTIONS[focusCategory].map((question) => (
+                <button
+                  key={question.label}
+                  disabled={!request || busy || !!impact}
+                  aria-pressed={
+                    !!request &&
+                    !behaviorOpen &&
+                    request.direction === question.direction &&
+                    request.neighborKind === question.neighborKind &&
+                    request.kinds.length === question.kinds.length &&
+                    question.kinds.every((kind) => request.kinds.includes(kind))
+                  }
+                  onClick={() => {
+                    if (trail) setTrail({ ...trail, paused: true });
+                    setOutcomeId(undefined);
+                    change(
+                      {
+                        kinds: question.kinds,
+                        direction: question.direction,
+                        neighborKind: question.neighborKind,
+                        groups: {},
+                        internals: [],
+                      },
+                      true,
+                    );
+                  }}
+                >
+                  {question.label}
+                </button>
+              ))}
+              {focusCategory === 'function' && (
+                <button
+                  disabled={!request || busy || !!impact}
+                  aria-pressed={behaviorOpen}
+                  onClick={() => openBehavior(request!.focus)}
+                >
+                  Flow
+                </button>
+              )}
+            </div>
+            {request?.neighborKind && (
+              <p className="muted">
+                Methods using this type, including receiver and signature uses.
+              </p>
+            )}
             <button
               disabled={!history.length || busy}
               title={`Restore ${explorationDestination(history.at(-1))}`}
@@ -1960,22 +1998,6 @@ export default function App() {
               </div>
             )}
           </div>
-          {project?.diagnostics.length ? (
-            <details className="diagnostics">
-              <summary>{coverageLabel(project.diagnostics)}</summary>
-              {project.diagnostics.map((diagnostic, index) => (
-                <p key={index}>
-                  {diagnostic.severity}: {diagnostic.message}{' '}
-                  {diagnostic.packageId && `(${diagnostic.packageId})`}
-                </p>
-              ))}
-            </details>
-          ) : project ? (
-            <p className="coverage">
-              Analysis completed without package errors. Static evidence cannot establish runtime
-              execution or resolve every dynamic target.
-            </p>
-          ) : null}
         </main>
         <aside
           ref={inspector}

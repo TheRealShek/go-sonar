@@ -1,4 +1,4 @@
-import { BaseEdge, getBezierPath, getSmoothStepPath, type EdgeProps } from '@xyflow/react';
+import { BaseEdge, getSmoothStepPath, type EdgeProps } from '@xyflow/react';
 import type { EdgeRoute, Point } from './layout/contract';
 import type { GraphView, ViewEdge } from './shared/protocol';
 
@@ -127,16 +127,46 @@ function labelPosition(sections: Point[][]): Point {
   return midpoint;
 }
 
+// Trim each bend before drawing its quadratic corner so short segments never overshoot.
+export function routedPath(points: Point[], radius = 12): string {
+  const vertices = points.filter(
+    (point, index) => !index || point.x !== points[index - 1].x || point.y !== points[index - 1].y,
+  );
+  if (!vertices.length) return '';
+  let path = `M ${vertices[0].x} ${vertices[0].y}`;
+  for (let index = 1; index < vertices.length - 1; index++) {
+    const before = vertices[index - 1];
+    const corner = vertices[index];
+    const after = vertices[index + 1];
+    const incoming = Math.hypot(corner.x - before.x, corner.y - before.y);
+    const outgoing = Math.hypot(after.x - corner.x, after.y - corner.y);
+    const bend =
+      (corner.x - before.x) * (after.y - corner.y) - (corner.y - before.y) * (after.x - corner.x);
+    const trim = bend ? Math.min(Math.max(0, radius), incoming / 2, outgoing / 2) : 0;
+    if (!trim) {
+      path += ` L ${corner.x} ${corner.y}`;
+      continue;
+    }
+    const entry = {
+      x: corner.x + ((before.x - corner.x) * trim) / incoming,
+      y: corner.y + ((before.y - corner.y) * trim) / incoming,
+    };
+    const exit = {
+      x: corner.x + ((after.x - corner.x) * trim) / outgoing,
+      y: corner.y + ((after.y - corner.y) * trim) / outgoing,
+    };
+    path += ` L ${entry.x} ${entry.y} Q ${corner.x} ${corner.y} ${exit.x} ${exit.y}`;
+  }
+  const end = vertices.at(-1)!;
+  return `${path} L ${end.x} ${end.y}`;
+}
+
 function RoutedEdge(props: EdgeProps) {
-  const curved = props.data?.curved === true;
-  const route = curved ? undefined : (props.data?.route as EdgeRoute | undefined);
-  const [fallback, x, y] = curved
-    ? getBezierPath(props)
-    : getSmoothStepPath({ ...props, borderRadius: 0 });
+  const radius = props.data?.rounded === true ? 12 : 0;
+  const route = props.data?.route as EdgeRoute | undefined;
+  const [fallback, x, y] = getSmoothStepPath({ ...props, borderRadius: radius });
   const path = route
-    ? route.sections
-        .map((points) => points.map((p, i) => `${i ? 'L' : 'M'} ${p.x} ${p.y}`).join(' '))
-        .join(' ')
+    ? route.sections.map((points) => routedPath(points, radius)).join(' ')
     : fallback;
   const label = route?.label ?? (route ? labelPosition(route.sections) : { x, y });
   return (

@@ -10,7 +10,7 @@ Open the project menu in the top bar, choose **Open folder**, select a directory
 
 Select an individual module, rather than a workspace root containing only `go.work`. Dependencies and the required Go toolchain must already be available locally. Analysis will report missing dependencies instead of downloading them.
 
-After loading, review the coverage summary and diagnostics. A graph with results can still have incomplete coverage.
+After loading, open **Coverage** in the top bar to review the coverage summary and diagnostics. A graph with results can still have incomplete coverage.
 
 ## Choose a starting point
 
@@ -20,7 +20,7 @@ The initial relationship choices depend on the symbol. Functions start with outg
 
 ## Explore relationships
 
-Choose a question to set the view:
+Choose a question beside the canvas to set the view:
 
 - **Calls** shows outgoing call relationships.
 - **Callers** shows incoming call relationships.
@@ -38,11 +38,11 @@ Use package and relationship groups to narrow one symbol's neighbors. The action
 
 ## Keep your place
 
-Toggle **Symbols** to hide or show discovery and exploration controls. **Filters** keeps relationship settings collapsed until needed. The application and native window use a dark Nord palette.
+Toggle **Symbols** to hide or show discovery and relationship filters. **Filters** keeps relationship settings collapsed until needed. The application and native window use a dark Nord palette.
 
-Call neighborhoods spread across horizontal layers. The initial view fits the neighborhood when labels remain at least 80% of their normal size; larger neighborhoods center the focus at normal size. Column position does not imply execution order. The minimap appears above 12 nodes.
+Call neighborhoods use compact horizontal columns with at most three nodes per layer. The initial view fits the neighborhood when labels remain at least 80% of their normal size; larger neighborhoods center the focus at normal size. Column position does not imply execution order. The minimap appears above 12 nodes.
 
-Calls use smooth curves with stable colors to distinguish connections. Curves can pass behind intermediate nodes. Flow uses square routed paths when the calculated layout matches the displayed nodes. Retained landmarks during disclosure or manual dragging can invalidate those routes; edges then attach directly to the current handles with square bends. These fallback paths can cross other nodes. Saved positions and exploration context stay intact.
+Calls and Callers use rounded routed paths with stable colors to distinguish connections. The routes avoid nodes in the calculated layout. Flow uses square routed paths when the calculated layout matches the displayed nodes. Retained landmarks during disclosure or manual dragging can invalidate those routes; edges then attach directly to the current handles with rounded bends in relationship views and square bends in Flow. These fallback paths can cross other nodes. Saved positions and exploration context stay intact.
 
 Call and dependency labels appear on hover, keyboard focus, or selection. Flow labels remain visible. Dashed lines mark uncertain relations; loop-back labels identify loops. The graph legend stays beside the canvas.
 

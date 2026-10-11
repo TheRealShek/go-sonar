@@ -35,6 +35,10 @@ export async function calculateLayout(
     id: 'root',
     layoutOptions: {
       'elk.algorithm': 'layered',
+      // Compact relationship columns; behavior groups retain source-order placement.
+      'elk.layered.nodePlacement.strategy': request.nodes.some((node) => node.parentId)
+        ? 'BRANDES_KOEPF'
+        : 'SIMPLE',
       'elk.direction': 'RIGHT',
       'elk.edgeRouting': 'ORTHOGONAL',
       'elk.spacing.edgeEdge': '16',

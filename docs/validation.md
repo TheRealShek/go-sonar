@@ -141,3 +141,20 @@ Validation passed:
 - Standards and specification reviews. Route-presence coverage and transient dismissal/focus findings were corrected and rechecked.
 
 The T3 preview opened, but two snapshot attempts timed out. The browser checks used a separate local Chromium instance. They did not exercise native WebKit, real-project analysis, or clipboard/folder transports. Earlier real-project validation above remains historical evidence, not a new acceptance run for this reconciliation.
+
+## Rounded routes and compact columns, 2026-10-11
+
+Calls and Callers now follow the `02-rounded-routed.png` reference: routed lines with bounded rounded corners, compact horizontal columns, question controls beside the canvas, and project coverage in a collapsed top-bar menu. Flow retains square bends and its existing placement strategy. Explicit inspection, navigation, disclosure landmarks, and walkthrough actions remain available.
+
+The three-node layer bound alone allowed an uneven fan-out to form a tall staircase. Compact node placement fixes that drift in relationship views. In the real LLM Gate `main` neighborhood, all nine nodes and eight edges fit the initial 1440 × 900 window across four columns. The rendered node footprint measured approximately 1151 × 419 pixels. Sampling the rendered edge paths every two pixels found no unrelated node-interior crossings in that initial view.
+
+Validation passed:
+
+- All 85 frontend tests, including rounded corner bounds, duplicate and collinear vertices, square paths, representative production-card fan-out framing, and existing exploration regressions.
+- TypeScript, production frontend build, frontend formatting, and diff whitespace checks.
+- Native Linux release workspace build without installer packaging.
+- Chromium acceptance using the real Go analyzer and Rust backend through a temporary local bridge against `/Drive2/Coding_Skills/Projects/llmgate`: initial rounded routes and framing, dark mode under a light system preference, explicit inspection, ordered Coverage dismissal, expansion to 17 nodes, real `run.go` source excerpts, incoming Callers, Flow overview with square bends and explicit start/pause/resume, and no page overflow at 960 pixels. No page errors occurred.
+- Matching SHA-256 hashes and Git status for all 22 tracked and nonignored LLM Gate files. The project remained unchanged.
+- Standards and specification reviews. One stale guide sentence about Symbols controls was corrected; no code findings remained.
+
+The T3 preview snapshot timed out twice, so browser acceptance used local Chromium. Native WebKit presentation and clipboard/folder transports were not exercised in this run. Retained landmarks and manual dragging can invalidate calculated routes; rounded relationship fallbacks and square Flow fallbacks can cross other nodes. These checks do not establish a performance budget or guarantee obstacle avoidance for those fallback paths.

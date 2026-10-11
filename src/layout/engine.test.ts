@@ -1,5 +1,6 @@
 import ELK from 'elkjs/lib/elk.bundled.js';
 import { displayBounds } from './bounds';
+import { focusViewport } from '../navigation';
 import { describe, expect, it } from 'vitest';
 import type { ELK as ElkAPI, ElkNode } from 'elkjs/lib/elk-api.js';
 import { calculateLayout } from './engine';
@@ -234,4 +235,40 @@ it('preserves manual positions and discards routes calculated for different geom
   expect(result.positions.a).toEqual({ x: 400, y: 400 });
   expect(result.positions.b).toEqual({ x: 20, y: 20 });
   expect(result.routes).toEqual({});
+});
+
+it('fits a production-sized uneven call fan-out in the available canvas without a vertical staircase', async () => {
+  const ids = [
+    'main',
+    'run',
+    'Background',
+    'Error',
+    'New',
+    'NewJSONHandler',
+    'SetDefault',
+    'Exit',
+    'NotifyContext',
+  ];
+  const request: LayoutRequest = {
+    nodes: ids.map((id) => ({ id, width: 220, height: 112 })),
+    edges: ids
+      .slice(1)
+      .map((id) => ({ id: `main-${id}`, source: 'main', target: id, kind: 'calls' })),
+  };
+  const result = await calculateLayout(request, new ELK());
+  const bounds = displayBounds(
+    request.nodes.map((node) => ({ ...node, position: result.positions[node.id] })),
+  )!;
+  expect(bounds.height).toBeLessThan(600);
+  expect(bounds.width).toBeGreaterThan(bounds.height * 2);
+  const canvas = { width: 1230, height: 590 };
+  const viewport = focusViewport(result.positions.main, 220, canvas, bounds);
+  expect(viewport.zoom).toBeGreaterThanOrEqual(0.8);
+  expect(viewport.y + bounds.y * viewport.zoom).toBeGreaterThanOrEqual(0);
+  expect(viewport.y + (bounds.y + bounds.height) * viewport.zoom).toBeLessThanOrEqual(
+    canvas.height,
+  );
+  expect(Object.keys(result.routes)).toHaveLength(request.edges.length);
+  checkGeometry(request, result);
+  checkRoutes(request, result);
 });
