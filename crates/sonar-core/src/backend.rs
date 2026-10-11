@@ -131,6 +131,21 @@ impl Backend {
             .browse(kind, package, offset)
     }
 
+    /// Search and filter declarations with complete counts and bounded pages.
+    pub fn find_symbols(
+        &self,
+        query: &str,
+        kind: &str,
+        package: &str,
+        offset: usize,
+    ) -> Result<crate::SymbolPage> {
+        let store = self.store.lock().map_err(|_| Error::State)?;
+        store
+            .as_ref()
+            .ok_or(Error::NoProject)?
+            .find_symbols(query, kind, package, offset)
+    }
+
     /// Discover entries and package names for the opening guide.
     pub fn discovery(&self) -> Result<crate::Discovery> {
         let store = self.store.lock().map_err(|_| Error::State)?;
@@ -188,5 +203,18 @@ impl Backend {
             source,
             &fingerprint,
         )
+    }
+
+    /// Reacquire one source occurrence from the requested published snapshot.
+    pub fn resolve_source(
+        &self,
+        target: &crate::EvidenceTarget,
+        snapshot: &str,
+    ) -> Result<crate::EvidenceResolution> {
+        let store = self.store.lock().map_err(|_| Error::State)?;
+        store
+            .as_ref()
+            .ok_or(Error::NoProject)?
+            .resolve_source(target, snapshot)
     }
 }

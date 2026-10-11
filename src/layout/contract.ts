@@ -24,6 +24,7 @@ export interface LayoutEdge {
 export interface LayoutRequest {
   nodes: LayoutNode[];
   edges: LayoutEdge[];
+  anchorId?: string;
 }
 
 export interface LayoutResult {

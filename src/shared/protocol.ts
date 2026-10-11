@@ -99,6 +99,7 @@ export interface GraphRequest {
   direction?: 'incoming' | 'outgoing' | 'both';
   offsets?: Record<string, number>;
   neighborLimit?: number;
+  neighborKind?: 'method';
   groups?: Record<string, NeighborFilter>;
   regions?: string[];
   behaviorAnchors?: Record<string, string>;
@@ -109,6 +110,37 @@ export interface SourceExcerpt {
   file: string;
   firstLine: number;
   text: string;
+}
+
+export type EvidenceTarget =
+  | { kind: 'declaration'; symbolId: string }
+  | {
+      kind: 'operation';
+      functionId: string;
+      operationKind: string;
+      expression: string;
+      access?: { name: string; kind: string; expression: string };
+      connection?: {
+        kind: string;
+        label: string;
+        targetSymbolId?: string;
+        targetKind?: string;
+        targetExpression?: string;
+      };
+    }
+  | {
+      kind: 'connection';
+      source: string;
+      target: string;
+      relationship: string;
+      expression: string;
+    };
+
+export interface EvidenceResolution {
+  snapshot: string;
+  item?: ViewNode | ViewEdge;
+  source?: SourceSpan;
+  problem?: string;
 }
 
 export interface RelationSite {
