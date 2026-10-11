@@ -1,5 +1,5 @@
 import type { ELK, ElkNode } from 'elkjs/lib/elk-api.js';
-import type { LayoutRequest, LayoutResult } from './contract';
+import type { LayoutRequest, LayoutResult, Point } from './contract';
 
 export async function calculateLayout(
   request: LayoutRequest,
@@ -36,8 +36,15 @@ export async function calculateLayout(
     layoutOptions: {
       'elk.algorithm': 'layered',
       'elk.direction': 'RIGHT',
+      'elk.edgeRouting': 'ORTHOGONAL',
+      'elk.spacing.edgeEdge': '16',
+      'elk.spacing.edgeNode': '20',
+      'elk.layered.spacing.edgeEdgeBetweenLayers': '16',
+      // Spread call fan-out across horizontal layers.
+      'elk.layered.layering.strategy': 'COFFMAN_GRAHAM',
+      'elk.layered.layering.coffmanGraham.layerBound': '3',
       'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
-      'elk.spacing.nodeNode': '45',
+      'elk.spacing.nodeNode': '28',
       'elk.layered.spacing.nodeNodeBetweenLayers': '80',
     },
     children,
@@ -45,6 +52,17 @@ export async function calculateLayout(
       id: edge.id,
       sources: [edge.source],
       targets: [edge.target],
+      labels:
+        edge.kind === 'control' && edge.label
+          ? [
+              {
+                id: `${edge.id}-label`,
+                text: edge.label,
+                width: edge.label.length * 7 + 12,
+                height: 20,
+              },
+            ]
+          : [],
       layoutOptions: {
         'elk.layered.priority.direction': edge.loopBack
           ? '0'
@@ -64,6 +82,9 @@ export async function calculateLayout(
     }
   };
   walk(output.children ?? []);
+
+  const routedPositions = structuredClone(positions);
+  const routedSizes = structuredClone(sizes);
 
   // Place known landmarks first, with the selected node and its parent taking priority.
   // New nodes move around those landmarks. Grow groups to contain retained child positions.
@@ -122,5 +143,43 @@ export async function calculateLayout(
   };
   place();
 
-  return { positions, sizes };
+  const routes: LayoutResult['routes'] = {};
+  const offsets = new Map<string, Point>([['root', { x: 0, y: 0 }]]);
+  const locate = (node: ElkNode, parent: Point) => {
+    const offset = { x: parent.x + (node.x ?? 0), y: parent.y + (node.y ?? 0) };
+    offsets.set(node.id, offset);
+    for (const child of node.children ?? []) locate(child, offset);
+  };
+  locate(output, { x: 0, y: 0 });
+  const collect = (node: ElkNode) => {
+    for (const edge of node.edges ?? []) {
+      const offset = offsets.get(edge.container ?? node.id)!;
+      const absolute = (point: Point): Point => ({ x: point.x + offset.x, y: point.y + offset.y });
+      const sections = (edge.sections ?? []).map((section) =>
+        [section.startPoint, ...(section.bendPoints ?? []), section.endPoint].map(absolute),
+      );
+      const label = edge.labels?.[0];
+      if (sections.length)
+        routes[edge.id] = {
+          sections,
+          label: label
+            ? absolute({
+                x: (label.x ?? 0) + (label.width ?? 0) / 2,
+                y: (label.y ?? 0) + (label.height ?? 0) / 2,
+              })
+            : undefined,
+        };
+    }
+    for (const child of node.children ?? []) collect(child);
+  };
+  collect(output);
+
+  const changedGeometry = request.nodes.some(
+    ({ id }) =>
+      positions[id].x !== routedPositions[id].x ||
+      positions[id].y !== routedPositions[id].y ||
+      sizes[id].width !== routedSizes[id].width ||
+      sizes[id].height !== routedSizes[id].height,
+  );
+  return { positions, sizes, routes: changedGeometry ? {} : routes };
 }

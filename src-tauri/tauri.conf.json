@@ -13,6 +13,8 @@
     "windows": [
       {
         "title": "Go Sonar",
+        "theme": "Dark",
+        "backgroundColor": "#191c23",
         "width": 1440,
         "height": 940,
         "minWidth": 960,

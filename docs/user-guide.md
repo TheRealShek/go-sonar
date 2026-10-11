@@ -6,7 +6,7 @@ For installation and startup, see [Run locally](../README.md#run-locally).
 
 ## Open a project
 
-Choose **Open folder**, select a directory containing `go.mod`, and analysis starts immediately. Choosing a **Recent project** also opens it immediately. You can instead enter an absolute path and choose **Open**. The empty canvas offers **Open folder** directly.
+Open the project menu in the top bar, choose **Open folder**, select a directory containing `go.mod`, and analysis starts immediately. Choosing a **Recent project** also opens it immediately. You can instead enter an absolute path and choose **Open**. The empty canvas offers **Open folder** directly.
 
 Select an individual module, rather than a workspace root containing only `go.work`. Dependencies and the required Go toolchain must already be available locally. Analysis will report missing dependencies instead of downloading them.
 
@@ -37,6 +37,14 @@ Connections with the same endpoints and relationship kind summarize repeated sou
 Use package and relationship groups to narrow one symbol's neighbors. The action names the direction, relationship, and package; other expansion seeds keep their filters. Remove its filter chip above the graph, or use **Show all packages** in the inspector, to restore the global filters. **Previous neighbors** and **Next neighbors** reveal other pages. Counts distinguish connections hidden by filters, collapse, pagination, and view limits. Hidden counts are not proof of missing code, and a small visible graph is not the full set of known relationships.
 
 ## Keep your place
+
+Toggle **Symbols** to hide or show discovery and exploration controls. **Filters** keeps relationship settings collapsed until needed. The application and native window use a dark Nord palette.
+
+Call neighborhoods spread across horizontal layers. The initial view fits the neighborhood when labels remain at least 80% of their normal size; larger neighborhoods center the focus at normal size. Column position does not imply execution order. The minimap appears above 12 nodes.
+
+Calls use smooth curves with stable colors to distinguish connections. Curves can pass behind intermediate nodes. Flow uses square routed paths when the calculated layout matches the displayed nodes. Retained landmarks during disclosure or manual dragging can invalidate those routes; edges then attach directly to the current handles with square bends. These fallback paths can cross other nodes. Saved positions and exploration context stay intact.
+
+Call and dependency labels appear on hover, keyboard focus, or selection. Flow labels remain visible. Dashed lines mark uncertain relations; loop-back labels identify loops. The graph legend stays beside the canvas.
 
 Expansion preserves the viewport. Following flow preserves zoom and pans only when the next operation leaves the comfortable visible area. Enable **Keep current step centered** for automatic centering at your chosen zoom. Use **Center focus** to return to the focused declaration and **Show selected node** to locate the current selection. Fit the graph explicitly when you want an overview; a large overview may shrink labels.
 

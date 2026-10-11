@@ -16,7 +16,8 @@ import { FlowNavigator, BranchHistory } from './FlowNavigator';
 import {
   GraphLegend,
   edgeLabel,
-  relationshipColors,
+  connectionColor,
+  edgeTypes,
   selectionConnections,
   graphEmphasis,
 } from './GraphEdges';
@@ -150,6 +151,11 @@ export default function App() {
   const reopenSource = useRef<EvidenceResolution | undefined>(undefined);
   const sourceRecoveryBlocked = useRef(false);
   const [recents, setRecents] = useState(recentPaths);
+  const [explorerOpen, setExplorerOpen] = useState(true);
+  const [projectMenuOpen, setProjectMenuOpen] = useState(true);
+  const projectMenu = useRef<HTMLDetailsElement>(null);
+  const explorerInvoker = useRef<HTMLElement | null>(null);
+  const explorerToggle = useRef<HTMLButtonElement>(null);
   const [wideSource, setWideSource] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [keepStepCentered, setKeepStepCentered] = useState(false);
@@ -200,7 +206,14 @@ export default function App() {
   const identityInvoker = useRef<HTMLElement | null>(null);
   const resetInvoker = useRef<HTMLElement | null>(null);
   const suppressIdentityFocus = useRef(false);
-  const transientOrder = useRef({ sequence: 0, inspector: 0, identity: 0, reset: 0 });
+  const transientOrder = useRef({
+    sequence: 0,
+    inspector: 0,
+    identity: 0,
+    reset: 0,
+    project: 0,
+    explorer: 0,
+  });
   const framedFocus = useRef<string | undefined>(undefined);
   const restored = useRef<NavigationFrame | undefined>(undefined);
   const pendingSelection = useRef<string | undefined>(undefined);
@@ -360,6 +373,7 @@ export default function App() {
         }
       }
       setProject(summary);
+      setProjectMenuOpen(false);
       if (!refresh || summary.snapshot !== project?.snapshot) setBinding(undefined);
       if (isDesktop) {
         const next = [summary.root, ...recents.filter((path) => path !== summary.root)].slice(0, 8);
@@ -573,7 +587,9 @@ export default function App() {
             target: edge.target,
             label: edgeLabel(edge),
             ariaLabel: `${nodeName(result.nodes, edge.source)} to ${nodeName(result.nodes, edge.target)}: ${edgeLabel(edge)}`,
-            type: edge.loopBack ? 'smoothstep' : 'default',
+            type: 'routed',
+            data: { route: geometry.routes[edge.id], curved: grouped.size === 0 },
+            className: edge.kind === 'control' ? 'control-edge' : 'dependency-edge',
             sourceHandle:
               edge.kind !== 'control' &&
               result.nodes.find((node) => node.id === edge.source)?.parentId
@@ -585,13 +601,15 @@ export default function App() {
                     : undefined,
             markerEnd: {
               type: MarkerType.ArrowClosed,
-              color: relationshipColors[edge.kind] ?? '#52647d',
+              color: connectionColor(edge.id, edge.kind, edge.label),
             },
             style: {
-              stroke: relationshipColors[edge.kind] ?? '#52647d',
+              stroke: connectionColor(edge.id, edge.kind, edge.label),
+              strokeWidth: 2,
               strokeDasharray: edge.certainty === 'possible' ? '6 4' : undefined,
             },
-            labelStyle: { fontSize: 11, fill: '#30485f' },
+            labelStyle: { fontSize: 11, fill: 'var(--foreground)' },
+            labelBgStyle: { fill: 'var(--panel)' },
             reconnectable: false,
           })),
         );
@@ -694,7 +712,18 @@ export default function App() {
             const bounds = canvas.current?.getBoundingClientRect();
             if (bounds)
               await flow.current.setViewport(
-                focusViewport(geometry.positions[result.focus], size.width, bounds),
+                focusViewport(
+                  geometry.positions[result.focus],
+                  size.width,
+                  bounds,
+                  displayBounds(
+                    result.nodes.map((node) => ({
+                      parentId: node.parentId,
+                      position: geometry.positions[node.id],
+                      ...geometry.sizes[node.id],
+                    })),
+                  ),
+                ),
                 { duration: 0 },
               );
           }
@@ -771,6 +800,7 @@ export default function App() {
     opened: (summary) => {
       positions.current.clear();
       setProject(summary);
+      setProjectMenuOpen(false);
     },
     render: (result, valid, started, presentation) => {
       setRequest(requestFor(result.focus));
@@ -1184,6 +1214,12 @@ export default function App() {
       if (event.defaultPrevented) return;
       if (event.key === 'Escape') {
         const layers = [
+          { name: 'project', visible: projectMenuOpen, order: transientOrder.current.project },
+          {
+            name: 'explorer',
+            visible: explorerOpen && window.matchMedia('(max-width: 750px)').matches,
+            order: transientOrder.current.explorer,
+          },
           { name: 'reset', visible: resetPreview, order: transientOrder.current.reset },
           {
             name: 'identity',
@@ -1195,7 +1231,14 @@ export default function App() {
           .filter((layer) => layer.visible)
           .sort((left, right) => right.order - left.order);
         const top = layers[0]?.name;
-        if (top === 'reset') {
+        if (top === 'project') {
+          if (projectMenu.current) projectMenu.current.open = false;
+          setProjectMenuOpen(false);
+          restoreFocus(projectMenu.current?.querySelector('summary') ?? null);
+        } else if (top === 'explorer') {
+          setExplorerOpen(false);
+          restoreFocus(explorerInvoker.current ?? explorerToggle.current);
+        } else if (top === 'reset') {
           setResetPreview(false);
           restoreFocus(resetInvoker.current);
         } else if (top === 'identity') dismissIdentity();
@@ -1207,6 +1250,7 @@ export default function App() {
       }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
+        showExplorer();
         searchInput.current?.focus();
         searchInput.current?.select();
         return;
@@ -1214,6 +1258,7 @@ export default function App() {
       if (isEditing(event.target) || event.ctrlKey || event.metaKey || event.altKey) return;
       if (event.key === '/') {
         event.preventDefault();
+        showExplorer();
         searchInput.current?.focus();
       } else if (event.key.toLowerCase() === 'i' && selected) {
         event.preventDefault();
@@ -1232,6 +1277,13 @@ export default function App() {
 
   const onNodesChange = (changes: NodeChange<SymbolNode>[]) => {
     setNodes((current) => applyNodeChanges(changes, current));
+    if (changes.some((change) => change.type === 'position'))
+      setEdges((current) =>
+        current.map((edge) => ({
+          ...edge,
+          data: { ...edge.data, route: undefined },
+        })),
+      );
 
     for (const change of changes)
       if (change.type === 'position' && change.position) {
@@ -1283,6 +1335,14 @@ export default function App() {
     restore(destination);
   };
 
+  const showExplorer = () => {
+    if (!explorerOpen)
+      explorerInvoker.current =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    transientOrder.current.explorer = ++transientOrder.current.sequence;
+    flushSync(() => setExplorerOpen(true));
+  };
+
   const statusLabel = busy
     ? `${busyTask}…`
     : view
@@ -1299,60 +1359,80 @@ export default function App() {
           <span>Local Go code explorer</span>
         </div>
         {!isDesktop && <b className="sample-banner">SAMPLE PREVIEW · no local analysis</b>}
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            void loadProject();
-          }}
-        >
-          <input
-            aria-label="Project path"
-            placeholder="Absolute Go module path"
-            value={root}
-            onChange={(event) => setRoot(event.target.value)}
-            disabled={!isDesktop}
-          />
-          <button disabled={busy || (isDesktop && !root.trim())}>
-            {isDesktop ? 'Open project' : 'Open sample'}
-          </button>
-        </form>
-        {isDesktop && (
-          <button
-            disabled={busy}
-            onClick={() => {
-              void chooseProjectFolder()
-                .then((path) => {
-                  if (path) void loadProject(false, path);
-                })
-                .catch((error) => setError(String(error)));
+        <details className="project-menu" ref={projectMenu} open={projectMenuOpen}>
+          <summary
+            onClick={(event) => {
+              event.preventDefault();
+              if (!projectMenuOpen)
+                transientOrder.current.project = ++transientOrder.current.sequence;
+              setProjectMenuOpen(!projectMenuOpen);
             }}
           >
-            Open folder
-          </button>
-        )}
-        {isDesktop && !!recents.length && (
-          <select
-            aria-label="Recent projects"
-            value=""
-            disabled={busy}
-            onChange={(event) => {
-              if (event.target.value) void loadProject(false, event.target.value);
-            }}
-          >
-            <option value="">Recent projects</option>
-            {recents.map((path) => (
-              <option key={path} value={path}>
-                {path}
-              </option>
-            ))}
-          </select>
-        )}
+            {project?.name ?? 'Open project'}
+          </summary>
+          <div className="project-popover">
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void loadProject();
+              }}
+            >
+              <input
+                aria-label="Project path"
+                placeholder="Absolute Go module path"
+                value={root}
+                onChange={(event) => setRoot(event.target.value)}
+                disabled={!isDesktop}
+              />
+              <button disabled={busy || (isDesktop && !root.trim())}>
+                {isDesktop ? 'Open project' : 'Open sample'}
+              </button>
+            </form>
+            {isDesktop && (
+              <button
+                disabled={busy}
+                onClick={() => {
+                  void chooseProjectFolder()
+                    .then((path) => {
+                      if (path) void loadProject(false, path);
+                    })
+                    .catch((error) => setError(String(error)));
+                }}
+              >
+                Open folder
+              </button>
+            )}
+            {isDesktop && !!recents.length && (
+              <select
+                aria-label="Recent projects"
+                value=""
+                disabled={busy}
+                onChange={(event) => {
+                  if (event.target.value) void loadProject(false, event.target.value);
+                }}
+              >
+                <option value="">Recent projects</option>
+                {recents.map((path) => (
+                  <option key={path} value={path}>
+                    {path}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        </details>
         <button disabled={!project || busy} onClick={() => void loadProject(true)}>
           Refresh
         </button>
       </header>
       <div className="workspace">
-        <aside className="explorer">
+        <aside className="explorer" hidden={!explorerOpen}>
+          <div className="panel-heading">
+            <h2>Symbols</h2>
+            <button aria-label="Close symbols" onClick={() => setExplorerOpen(false)}>
+              ×
+            </button>
+          </div>
           <p className="keyboard-help">
             Shortcuts: Ctrl/Cmd+K or / search · I inspect · [ previous step · ] next step
           </p>
@@ -1423,43 +1503,56 @@ export default function App() {
           {request?.neighborKind && (
             <p className="muted">Methods using this type, including receiver and signature uses.</p>
           )}
-          <h3>Relationships</h3>
-          {RELATIONS.map((kind) => (
-            <label className="checkbox" key={kind}>
-              <input
-                type="checkbox"
-                checked={request?.kinds.includes(kind) ?? kind === 'calls'}
+          <details>
+            <summary>Filters</summary>
+            {RELATIONS.map((kind) => (
+              <label className="checkbox" key={kind}>
+                <input
+                  type="checkbox"
+                  checked={request?.kinds.includes(kind) ?? kind === 'calls'}
+                  disabled={!request || busy || !!impact}
+                  onChange={() =>
+                    change({ neighborKind: undefined, kinds: toggleId(request!.kinds, kind) })
+                  }
+                />
+                {kind.replace('_', ' ')}
+              </label>
+            ))}
+            <label>
+              Neighbor direction
+              <select
                 disabled={!request || busy || !!impact}
-                onChange={() =>
-                  change({ neighborKind: undefined, kinds: toggleId(request!.kinds, kind) })
+                value={request?.direction ?? 'outgoing'}
+                onChange={(event) =>
+                  change({
+                    direction: event.target.value as GraphRequest['direction'],
+                    neighborKind: undefined,
+                  })
                 }
-              />
-              {kind.replace('_', ' ')}
+              >
+                <option value="both">Incoming and outgoing</option>
+                <option value="incoming">Incoming consumers</option>
+                <option value="outgoing">Outgoing dependencies</option>
+              </select>
             </label>
-          ))}
-          <label>
-            Neighbor direction
-            <select
-              disabled={!request || busy || !!impact}
-              value={request?.direction ?? 'outgoing'}
-              onChange={(event) =>
-                change({
-                  direction: event.target.value as GraphRequest['direction'],
-                  neighborKind: undefined,
-                })
-              }
-            >
-              <option value="both">Incoming and outgoing</option>
-              <option value="incoming">Incoming consumers</option>
-              <option value="outgoing">Outgoing dependencies</option>
-            </select>
-          </label>
+          </details>
           <p className="muted">
             At most {VIEW_LIMIT} nodes per view. Filters and collapsed branches hide relationships.
           </p>
         </aside>
         <main>
           <div className="graph-toolbar">
+            <button
+              ref={explorerToggle}
+              aria-label="Toggle symbols"
+              aria-expanded={explorerOpen}
+              onClick={() => {
+                if (explorerOpen) setExplorerOpen(false);
+                else showExplorer();
+              }}
+            >
+              Symbols
+            </button>
             <button
               disabled={!history.length || busy}
               title={`Restore ${explorationDestination(history.at(-1))}`}
@@ -1739,10 +1832,12 @@ export default function App() {
                 return {
                   ...edge,
                   selected: selected?.id === edge.id,
-                  className: `${paths || selected ? (emphasized.edges.has(edge.id) ? 'connected-relationship' : 'dimmed') : ''} ${!paths && view?.edges.some((candidate) => candidate.id === edge.id && candidate.source === current && candidate.kind === 'control') ? 'next-operation' : ''}`,
+                  className: `${edge.className ?? ''} ${paths || selected ? (emphasized.edges.has(edge.id) ? 'connected-relationship' : 'dimmed') : ''} ${!paths && view?.edges.some((candidate) => candidate.id === edge.id && candidate.source === current && candidate.kind === 'control') ? 'next-operation' : ''}`,
                 };
               })}
               nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
+              colorMode="dark"
               onInit={(instance) => {
                 flow.current = instance;
               }}
@@ -1798,9 +1893,9 @@ export default function App() {
                 setPinned(false);
               }}
             >
-              <Background gap={24} />
+              <Background gap={24} color="var(--border)" />
               <Controls showInteractive={false} />
-              <MiniMap pannable zoomable />
+              {nodes.length > 12 && <MiniMap pannable zoomable />}
             </ReactFlow>
             {(hovered || (pinned && selected)) && (
               <div
@@ -1838,7 +1933,12 @@ export default function App() {
                       Choose a declaration in Find any symbol. Packages and types are starting
                       points for libraries.
                     </p>
-                    <button onClick={() => searchInput.current?.focus()}>
+                    <button
+                      onClick={() => {
+                        showExplorer();
+                        searchInput.current?.focus();
+                      }}
+                    >
                       Find a starting point
                     </button>
                   </>

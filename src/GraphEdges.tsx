@@ -1,16 +1,33 @@
+import { BaseEdge, getBezierPath, getSmoothStepPath, type EdgeProps } from '@xyflow/react';
+import type { EdgeRoute, Point } from './layout/contract';
 import type { GraphView, ViewEdge } from './shared/protocol';
 
 export const relationshipColors: Record<string, string> = {
-  control: '#277e88',
-  data: '#8650b1',
-  calls: '#52647d',
-  references: '#52647d',
-  reads: '#8650b1',
-  writes: '#8650b1',
-  constructs: '#52647d',
-  implements: '#52647d',
-  uses_type: '#52647d',
+  control: '#88c0d0',
+  data: '#b48ead',
+  calls: '#81a1c1',
+  references: '#81a1c1',
+  reads: '#b48ead',
+  writes: '#b48ead',
+  constructs: '#81a1c1',
+  implements: '#81a1c1',
+  uses_type: '#81a1c1',
 };
+
+const connectionColors = ['#81a1c1', '#88c0d0', '#a3be8c', '#b48ead', '#ebcb8b', '#d5967a'];
+
+export function connectionColor(id: string, kind: string, label: string) {
+  if (['data', 'reads', 'writes'].includes(kind)) return '#b48ead';
+  if (kind === 'control') {
+    if (['false', 'done'].includes(label)) return '#d5967a';
+    if (['true', 'iterate', 'next item'].includes(label)) return '#a3be8c';
+    return '#88c0d0';
+  }
+  if (kind !== 'calls') return relationshipColors[kind] ?? '#81a1c1';
+  let hash = 0;
+  for (const char of id) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return connectionColors[hash % connectionColors.length];
+}
 
 export function relationshipName(kind: string): string {
   return kind.replaceAll('_', ' ');
@@ -63,9 +80,10 @@ export function GraphLegend({ view }: { view: GraphView }) {
         <span key={kind}>
           <i
             className="legend-line"
-            style={{ borderColor: relationshipColors[kind] ?? '#52647d' }}
+            style={{ borderColor: relationshipColors[kind] ?? '#81a1c1' }}
           />
           {relationshipName(kind)}
+          {!behavior && kind === 'calls' ? ' · colors trace individual connections' : ''}
           {kind === 'control' ? ' · source order' : ''}
         </span>
       ))}
@@ -77,7 +95,7 @@ export function GraphLegend({ view }: { view: GraphView }) {
       {view.edges.some((edge) => edge.loopBack) && <span>↺ solid return route · loop back</span>}
       {behavior && (
         <span>
-          <i className="legend-line" style={{ borderColor: '#d88819' }} />
+          <i className="legend-line" style={{ borderColor: '#ebcb8b' }} />
           Next step
         </span>
       )}
@@ -91,3 +109,58 @@ export function GraphLegend({ view }: { view: GraphView }) {
     </div>
   );
 }
+
+function labelPosition(sections: Point[][]): Point {
+  let length = -1;
+  let midpoint = sections[0][0];
+  for (const points of sections) {
+    for (let i = 1; i < points.length; i++) {
+      const a = points[i - 1];
+      const b = points[i];
+      const distance = Math.hypot(b.x - a.x, b.y - a.y);
+      if (distance > length) {
+        length = distance;
+        midpoint = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      }
+    }
+  }
+  return midpoint;
+}
+
+function RoutedEdge(props: EdgeProps) {
+  const curved = props.data?.curved === true;
+  const route = curved ? undefined : (props.data?.route as EdgeRoute | undefined);
+  const [fallback, x, y] = curved
+    ? getBezierPath(props)
+    : getSmoothStepPath({ ...props, borderRadius: 0 });
+  const path = route
+    ? route.sections
+        .map((points) => points.map((p, i) => `${i ? 'L' : 'M'} ${p.x} ${p.y}`).join(' '))
+        .join(' ')
+    : fallback;
+  const label = route?.label ?? (route ? labelPosition(route.sections) : { x, y });
+  return (
+    <>
+      <BaseEdge
+        className="edge-halo"
+        path={path}
+        style={{ stroke: 'var(--canvas)', strokeWidth: 6 }}
+        interactionWidth={0}
+      />
+      <BaseEdge
+        id={props.id}
+        path={path}
+        markerEnd={props.markerEnd}
+        style={props.style}
+        label={props.label}
+        labelX={label.x}
+        labelY={label.y}
+        labelStyle={props.labelStyle}
+        labelBgStyle={props.labelBgStyle}
+        interactionWidth={18}
+      />
+    </>
+  );
+}
+
+export const edgeTypes = { routed: RoutedEdge };
