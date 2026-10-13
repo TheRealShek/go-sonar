@@ -45,6 +45,18 @@ fn query(id: &str) -> GraphRequest {
     }
 }
 
+// Inspect all requested region evidence while keeping the production view bound.
+fn disclosed_view(store: &GraphStore, request: &mut GraphRequest) -> GraphView {
+    let overview = store.graph(request).unwrap();
+    request.regions = overview
+        .nodes
+        .iter()
+        .filter(|node| node.kind == "region")
+        .map(|node| node.id.clone())
+        .collect();
+    store.graph(request).unwrap()
+}
+
 fn ancestors(view: &GraphView, target: &str) -> HashSet<String> {
     let mut result = HashSet::new();
     let mut queue = VecDeque::from([target.to_owned()]);
@@ -73,7 +85,7 @@ fn sample_paths_distinguish_cache_hit_lookup_failure_and_normalizing_write() {
     );
     let mut request = query(&get.id);
     request.internals = vec![get.id.clone()];
-    let view = store.graph(&request).unwrap();
+    let view = disclosed_view(&store, &mut request);
     let returns = &view.behaviors[0].returns;
     assert_eq!(returns.len(), 3);
     let call = view
@@ -185,6 +197,19 @@ fn long_entry_projects_regions_and_reveals_exact_hidden_continuations() {
     request.behavior_anchors = HashMap::from([(main.id.clone(), first.clone())]);
     let expanded = store.graph(&request).unwrap();
     assert!(expanded.nodes.iter().any(|n| n.id == *first));
+    let group = expanded
+        .nodes
+        .iter()
+        .find(|node| node.id == *first)
+        .unwrap()
+        .details
+        .as_ref()
+        .unwrap()
+        .source_group
+        .as_ref()
+        .unwrap();
+    assert_eq!(group.id, region.id);
+    assert!(group.first_line <= group.end_line);
     assert!(expanded.nodes.len() <= 80);
     if let Some(edge) = view.edges.iter().find(|e| e.hidden_target_id.is_some()) {
         let target = edge.hidden_target_id.clone().unwrap();
@@ -267,7 +292,7 @@ fn unsupported_behavior_and_binding_aliases_stay_visible() {
     let mapping = store.search("Mappings", 10).unwrap().remove(0);
     let mut request = query(&mapping.id);
     request.internals = vec![mapping.id.clone()];
-    let view = store.graph(&request).unwrap();
+    let view = disclosed_view(&store, &mut request);
     assert!(view.nodes.iter().any(|n| {
         n.details
             .as_ref()

@@ -125,11 +125,29 @@ func (e *Engine) analyze(ctx context.Context, root string) (Batch, error) {
 		Dir:     root,
 		Env:     environment(),
 		Mode: packages.NeedName | packages.NeedFiles |
-			packages.NeedCompiledGoFiles | packages.NeedImports | packages.NeedModule,
+			packages.NeedCompiledGoFiles | packages.NeedImports | packages.NeedModule | packages.NeedDeps,
 	}
 	metadata, err := packages.Load(cfg, "./...")
 	if err != nil {
 		return batch, fmt.Errorf("load package metadata: %w", err)
+	}
+
+	// This project is loaded in module mode. Dependency metadata distinguishes
+	// module dependencies from Go's module-free standard packages without names.
+	origins := map[string]string{"builtin": "builtin"}
+
+	packages.Visit(metadata, func(p *packages.Package) bool {
+		if p.Module != nil {
+			origins[p.PkgPath] = "dependency"
+		} else if len(p.GoFiles) > 0 {
+			origins[p.PkgPath] = "stdlib"
+		}
+
+		return true
+	}, nil)
+
+	for _, p := range metadata {
+		origins[p.PkgPath] = "project"
 	}
 
 	full := e.root != root || e.config != config
@@ -283,7 +301,8 @@ func (e *Engine) analyze(ctx context.Context, root string) (Batch, error) {
 				continue
 			}
 
-			facts := extract(p)
+			facts := extract(p, origins)
+
 			facts.SourceFingerprints = map[string]string{}
 			for _, file := range facts.Files {
 				fingerprint, ok := input.files[file]

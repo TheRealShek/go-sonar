@@ -39,7 +39,7 @@ For a first example, open the absolute path to `fixtures/sample` in this checkou
 
 Start with the [user guide](docs/user-guide.md) for everyday use and troubleshooting. Use the [development guide](docs/development.md) to build, check, and benchmark the app.
 
-The [approved minimal UI design](docs/ui-design.md) records the three main screens, screenshots, and interactive prototype. It is the next implementation target; the prototype is not the current desktop app.
+The [approved minimal UI design](docs/ui-design.md) records the three main screens, screenshots, and interactive prototype. The prototype is the approved reference; [validation results](docs/validation.md) describe the local implementation and its real-project checks.
 
 | Document                                                     | What it explains                                                                  |
 | ------------------------------------------------------------ | --------------------------------------------------------------------------------- |

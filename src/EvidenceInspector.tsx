@@ -317,6 +317,11 @@ export function EvidenceInspector({
             <>
               <code>{node.details?.expression || node.signature}</code>
               <p className="source-location">{node.packageId}</p>
+              <p>
+                {node.details?.callName
+                  ? `${node.details.callKind || 'Callable kind unavailable'} · ${node.details.callOrigin || 'Origin unknown'}`
+                  : `${node.kind} · ${node.origin || 'Origin unknown'}`}
+              </p>
               {!node.details && !node.documentation && (
                 <p>No documented purpose supplied. Design intent is unknown.</p>
               )}

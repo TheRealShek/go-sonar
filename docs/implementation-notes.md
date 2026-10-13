@@ -58,7 +58,7 @@ The Linux benchmark sampler measures simultaneous process-tree PSS, including Go
 
 ## Presentation redesign
 
-The [approved minimal UI](ui-design.md) replaces earlier node-card, toolbar, legend, minimap, and square Flow-route proposals. Its screenshots are prototypes. This checkpoint does not claim that the desktop implements the redesign; native checks and implementation status belong in the validation record. Existing analysis limitations and bounds continue to apply.
+The [approved minimal UI](ui-design.md) replaces earlier node-card, toolbar, legend, minimap, and square Flow-route proposals. Its screenshots are prototypes. The documentation checkpoint preceded implementation. Local implementation and native check results are recorded in [Validation](validation.md), with prototype and real rendering evidence kept separate. Existing analysis limitations and bounds continue to apply.
 
 ## Remaining work
 

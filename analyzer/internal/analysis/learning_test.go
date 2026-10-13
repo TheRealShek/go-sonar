@@ -353,3 +353,50 @@ func TestBehaviorIDsAreSnapshotLocal(t *testing.T) {
 		t.Fatal("operation ID reuse scenario was not exercised", old)
 	}
 }
+
+// TestCompactPresentationFacts verifies source-backed origin, callable names, and distinct error returns.
+func TestCompactPresentationFacts(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "go.mod", "module net.example/project\n\ngo 1.26.0\n")
+	write(t, root, "main.go", `package project
+import "fmt"
+func work() error { return nil }
+func run(flag bool) error {
+ defer work()
+ err := work()
+ if err != nil { return fmt.Errorf("work: %w", err) }
+ if flag { return err }
+ return nil
+}`)
+	batch := analyze(t, &testEngine{}, root)
+
+	var wrapped, unwrapped, deferred bool
+
+	for _, facts := range batch.Packages {
+		for _, symbol := range facts.Symbols {
+			if symbol.Name == "Errorf" && symbol.Origin != "stdlib" {
+				t.Fatalf("fmt origin: %q", symbol.Origin)
+			}
+
+			if symbol.Name == "work" && symbol.Origin != "project" {
+				t.Fatalf("project origin: %q", symbol.Origin)
+			}
+		}
+
+		for _, behavior := range facts.Behaviors {
+			for _, node := range behavior.Nodes {
+				wrapped = wrapped || node.Details.ErrorReturn == "work: %w"
+				unwrapped = unwrapped || node.Details.ErrorReturn == "err"
+
+				deferred = deferred || (node.Details.Role == "defer" && node.Details.CallName == "work" && node.Details.CallOrigin == "project")
+				if node.Label == "return nil" && node.Details.ErrorReturn != "" {
+					t.Fatal("nil return marked as an error")
+				}
+			}
+		}
+	}
+
+	if !wrapped || !unwrapped || !deferred {
+		t.Fatalf("presentation facts: wrapped=%v unwrapped=%v deferred=%v", wrapped, unwrapped, deferred)
+	}
+}

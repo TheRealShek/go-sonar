@@ -4,7 +4,7 @@ Go Sonar helps you inspect Go declarations, their relationships, and the static 
 
 For installation and startup, see [Run locally](../README.md#run-locally).
 
-The [approved minimal UI design](ui-design.md) is the target for the next implementation. This documentation checkpoint records the design before changing the app; control names below describe existing capabilities until native verification confirms the redesign. The approved screenshots are prototypes, not desktop captures.
+The [minimal UI specification](ui-design.md) defines the approved presentation. Its screenshots are prototypes; [Validation](validation.md) records implementation checks separately.
 
 ## Open a project
 
@@ -18,7 +18,7 @@ After loading, open **Coverage** in the top bar to review the coverage summary a
 
 Use **Find any symbol** to search by declaration name, such as `Get`, and narrow the same result list by package and kind. Methods include their receiver, such as `Cache.Get`. The list shows the total match count and offers pages of results. Arrow keys choose a result and Enter opens it. With an empty query, executable modules offer entry points; libraries offer package and type starting points.
 
-The approved default for functions is Flow when behavior is available, with Calls and Callers still accessible. Fields retain incoming reads and writes; types retain construction and type-related uses. At this design checkpoint, the existing desktop still opens function calls first. The initial neighbor budget is eight connections. Preferences carry over within the same declaration category when you refocus.
+The approved default for functions is Flow when behavior is available, with Calls and Callers still accessible. Fields retain incoming reads and writes; types retain construction and type-related uses. The initial neighbor budget is eight connections. Relationship preferences carry over within each declaration category. Focusing a function starts its local Flow; unavailable behavior has an explicit fallback notice.
 
 ## Explore relationships
 
@@ -38,31 +38,25 @@ Connections with the same endpoints and relationship kind summarize repeated sou
 
 Use package and relationship groups to narrow one symbol's neighbors. The action names the direction, relationship, and package; other expansion seeds keep their filters. Remove its filter chip above the graph, or use **Show all packages** in the inspector, to restore the global filters. **Previous neighbors** and **Next neighbors** reveal other pages. Counts distinguish connections hidden by filters, collapse, pagination, and view limits. Hidden counts are not proof of missing code, and a small visible graph is not the full set of known relationships.
 
-## Keep your place in the current desktop
+## Keep your place
 
-Toggle **Symbols** to hide or show discovery and relationship filters. **Filters** keeps relationship settings collapsed until needed. The current desktop uses the earlier dark presentation. The approved warm light presentation is pending implementation.
+Toggle **Symbols** to hide or show discovery and filters. The interface uses a warm light palette. One signature line and package name identify the focused declaration; methods include their receiver.
 
-Call neighborhoods use compact horizontal columns with at most three nodes per layer. The initial view fits the neighborhood when labels remain at least 80% of their normal size; larger neighborhoods center the focus at normal size. Column position does not imply execution order. The minimap appears above 12 nodes.
+Default cards show one name. Project calls have no repeated origin badge; standard-library, dependency, builtin, and unknown calls carry a small tag. An unresolved concrete callable target retains its question marker. Hover and selection expose descriptions, declaration kind, origin, signatures, source, and limits. These facts remain inspectable at every density.
 
-Calls and Callers use rounded routed paths with stable colors to distinguish connections. The routes avoid nodes in the calculated layout. Flow uses square routed paths when the calculated layout matches the displayed nodes. Retained landmarks during disclosure or manual dragging can invalidate those routes; edges then attach directly to the current handles with rounded bends in relationship views and square bends in Flow. These fallback paths can cross other nodes. Saved positions and exploration context stay intact.
+Use the three detail levels beside **More**: **1 · Flow** shows compact names and control structure, **2 · Descriptions** adds source-derived descriptions, and **3 · Source** adds available ranges and type facts. Changing density preserves selection and viewport. Functions with fewer than 12 analyzed internal nodes start without collapsed source groups when the view budget permits. Longer functions use counted pills; **Expand** appears on hover or keyboard focus. Expanded groups use a left bracket and add ranges at level 3.
 
-Call and dependency labels appear on hover, keyboard focus, or selection. Flow labels remain visible. Dashed lines mark uncertain relations; loop-back labels identify loops. The graph legend stays beside the canvas.
+Calls and Callers use horizontal relationship columns. Flow follows vertical source structure with rounded routes. Boolean branches use **yes** and **no**. Error guards put their returning arm in a side lane; other no branches bypass to their source-defined continuation. Error-return pills show their actual wrapping message or expression. A **defer** marker identifies registration, with the deferred call in hover and inspection.
 
-Expansion preserves the viewport. Following flow preserves zoom and pans only when the next operation leaves the comfortable visible area. Enable **Keep current step centered** for automatic centering at your chosen zoom. Use **Center focus** to return to the focused declaration and **Show selected node** to locate the current selection. Fit the graph explicitly when you want an overview; a large overview may shrink labels.
+**More** contains viewport controls, exploration history, **Inspect**, collapse/reset actions, connections and pagination, and the graph key. **Follow a path** opens walkthrough and return-comparison controls. These sections retain coverage and analysis boundaries without occupying permanent toolbar rows.
 
-**Previous exploration** and **Next exploration** restore saved context, including selection, disclosure, walkthrough, and viewport. Their tooltips name the destination. Exploration breadcrumbs retain ordinary focus visits as well as entered calls; choosing one restores the last saved context for that visit. The context line distinguishes the explored declaration, followed operation, returned call, and current inspection. **Return to current step** selects the followed operation again.
+Selecting a canvas node opens its inspector. Double-clicking a node or connection also opens evidence. **Close inspector** reclaims its space; stepping through a walkthrough does not force it open. Hover details can be pinned or dismissed. Node navigation and disclosure controls work with keyboard focus and Enter.
 
-Double-click a node or connection to open its details. Conditions, returns, and direct calls keep the current exploration open. Use **Focus symbol** or **Enter this call** for explicit navigation.
+**Previous exploration** and **Next exploration** restore selection, disclosure, walkthrough, and viewport. Breadcrumbs restore saved visits. **Collapse selected branch** preserves other branches; **Reset to focus** previews the detail it will remove before applying it. Saved history can restore either operation.
 
-**Collapse selected branch** closes the selected declaration's neighbors and behavior, preserving other branches. Selecting an operation collapses its owning function. **Reset to focus** first describes the detail it will remove. **Apply reset** closes every expanded branch and behavior, clears package filters and pages, and ends the walkthrough and call stack. Relationship choices stay selected. **Previous exploration** restores the context before either collapse or reset.
+Entering a direct call keeps the immediate caller visible beside the callee, with its exact occurrence highlighted. **Return** restores the saved caller and continuation. The caller pane supports hover and keyboard inspection; return to its context before navigating or expanding its saved evidence. Only the immediate caller pane is rendered, with deeper calls in bounded history. Entering a callee does not automatically start a walkthrough.
 
-Selection updates an open inspector. Use **Inspect** to open a closed inspector and **Close inspector** to reclaim its space. Selecting or stepping through nodes keeps it closed. An operation's explanation and limitations appear first, followed by source evidence and actions such as **Enter this call**, **Reveal region**, or **View function flow**. Documentation, argument mappings, and local reads and writes stay expandable.
-
-Connection summaries, reset actions, and pagination are available above the graph without opening the inspector. Hover over a node for its identity card, or pin the details to keep them open. The card shows the signature, package, and source location when available. Methods use receiver-qualified names, such as **Cache.Get**, in search, graph labels, and inspection. Graph nodes keep a compact package label, with the full package in its tooltip. Behavior expressions can use three lines. Type-resolved signatures can differ from the declaration's spelling.
-
-The legend beside the canvas describes the relationships in the current view. Selecting a node emphasizes its connections and their endpoints; selecting an edge emphasizes its two endpoints. Unrelated edges dim. Relationship names remain visible. Dashed edges with **? possible** indicate uncertainty, solid return routes with **loop back** mark repetition, and **N source sites** counts repeated source occurrences. These marks describe source structure, not runtime observations.
-
-The approved replacement for these presentation controls is specified in [Minimal function exploration](ui-design.md). Detail levels, bracketed regions, and the three-screen layout are design targets until implementation is verified.
+Each live query remains bounded at 80 nodes. The saved caller is a separate bounded projection. Coverage diagnostics, omitted source sites, paging, source recovery, and change-impact inspection remain available.
 
 ## Follow a function
 

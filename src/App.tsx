@@ -3,7 +3,6 @@ import {
   ReactFlow,
   Background,
   Controls,
-  MiniMap,
   MarkerType,
   applyNodeChanges,
   type Edge,
@@ -23,6 +22,8 @@ import {
 } from './GraphEdges';
 import { evidenceTarget } from './source';
 import { symbolName, operationName, nodeName } from './identity';
+import { nodePresentation, errorDecision, type DetailLevel } from './nodePresentation';
+import { CallerPane } from './CallerPane';
 import { EvidenceInspector } from './EvidenceInspector';
 import { ConnectionSummary } from './ConnectionSummary';
 import { DiscoveryBrowser } from './DiscoveryBrowser';
@@ -153,6 +154,12 @@ export default function App() {
   const [recents, setRecents] = useState(recentPaths);
   const [explorerOpen, setExplorerOpen] = useState(true);
   const [projectMenuOpen, setProjectMenuOpen] = useState(true);
+  const [detailLevel, setDetailLevel] = useState<DetailLevel>(1);
+  const detailLevelRef = useRef<DetailLevel>(1);
+  const densityReflow = useRef(false);
+  const cardActions = useRef<{ enter: (node: ViewNode) => void; expand: (node: ViewNode) => void }>(
+    { enter: () => {}, expand: () => {} },
+  );
   const [coverageOpen, setCoverageOpen] = useState(false);
   const coverageMenu = useRef<HTMLDetailsElement>(null);
   const projectMenu = useRef<HTMLDetailsElement>(null);
@@ -169,6 +176,9 @@ export default function App() {
   const [edges, setEdges] = useState<Edge[]>([]);
 
   const [selected, setSelected] = useState<ViewNode | ViewEdge>();
+  const [inspectionFromCaller, setInspectionFromCaller] = useState(false);
+  const inspectionFromCallerRef = useRef(false);
+  inspectionFromCallerRef.current = inspectionFromCaller;
   const [excerpt, setExcerpt] = useState<SourceExcerpt>();
 
   const [busy, setBusy] = useState(false);
@@ -260,6 +270,8 @@ export default function App() {
       : undefined;
 
   const navigate = (next: GraphRequest, record = true) => {
+    setInspectionFromCaller(false);
+    densityReflow.current = false;
     const frame = capture();
     if (record && frame) {
       setHistory((previous) => [...previous.slice(-19), frame]);
@@ -310,7 +322,12 @@ export default function App() {
       view?.nodes.find((node) => node.id === id) ?? matches.find((node) => node.id === id);
     const nextKind = kind ?? fact?.kind ?? 'function';
     focusKind.current = nextKind;
-    navigate(requestFor(id, nextKind, preferences.current[categoryFor(nextKind)]));
+    const next = requestFor(id, nextKind, preferences.current[categoryFor(nextKind)]);
+    if (['function', 'method'].includes(nextKind)) {
+      next.internals = [id];
+      next.kinds = [];
+    }
+    navigate(next);
   };
 
   const loadProject = async (refresh = false, path = root, recoverSource = false) => {
@@ -334,6 +351,7 @@ export default function App() {
     setSourceLoading(false);
     setExcerpt(undefined);
     setSelected(undefined);
+    setInspectionFromCaller(false);
     setHovered(undefined);
     setPinned(false);
     setNavigationNotice('');
@@ -477,15 +495,24 @@ export default function App() {
             ? selectedRef.current?.id
             : result.focus),
         nodes: result.nodes.map((node) => {
-          const old = anchor?.id === node.id ? anchor.position : positions.current.get(node.id);
+          const old = densityReflow.current
+            ? undefined
+            : anchor?.id === node.id
+              ? anchor.position
+              : positions.current.get(node.id);
           const sameGroup = old?.parentId === node.parentId;
 
           return {
             id: node.id,
             parentId: node.parentId,
             role: node.details?.role,
-            width: grouped.has(node.id) ? 650 : 220,
-            height: grouped.has(node.id) ? 450 : node.parentId ? 136 : 112,
+            errorDecision: errorDecision(node, result),
+            width: grouped.has(node.id)
+              ? 0
+              : nodePresentation(node, result, detailLevelRef.current).width,
+            height: grouped.has(node.id)
+              ? 0
+              : nodePresentation(node, result, detailLevelRef.current).height,
             position: sameGroup && old ? { x: old.x, y: old.y } : undefined,
           };
         }),
@@ -498,9 +525,39 @@ export default function App() {
           loopBack,
         })),
       });
+      if (densityReflow.current) {
+        const id = positions.current.has(selectedRef.current?.id ?? '')
+          ? selectedRef.current!.id
+          : result.focus;
+        const old = positions.current.get(id);
+        const fresh = geometry.positions[id];
+        if (old && fresh) {
+          const oldParent = old.parentId ? positions.current.get(old.parentId) : undefined;
+          const parentId = result.nodes.find((node) => node.id === id)?.parentId;
+          const freshParent = parentId ? geometry.positions[parentId] : undefined;
+          const dx = old.x + (oldParent?.x ?? 0) - fresh.x - (freshParent?.x ?? 0);
+          const dy = old.y + (oldParent?.y ?? 0) - fresh.y - (freshParent?.y ?? 0);
+          for (const node of result.nodes.filter((node) => !node.parentId)) {
+            geometry.positions[node.id].x += dx;
+            geometry.positions[node.id].y += dy;
+          }
+          for (const route of Object.values(geometry.routes)) {
+            for (const section of route.sections)
+              for (const point of section) {
+                point.x += dx;
+                point.y += dy;
+              }
+            if (route.label) {
+              route.label.x += dx;
+              route.label.y += dy;
+            }
+          }
+        }
+      }
       const layoutMs = performance.now() - layoutStarted;
       if (!current()) return;
       pendingLayoutAnchor.current = undefined;
+      densityReflow.current = false;
       const selectedId = restored.current?.selectedId ?? pendingSelection.current;
       const initialNavigation = framedFocus.current !== result.focus;
       const newlyRevealed = new Set(
@@ -552,10 +609,28 @@ export default function App() {
             const size = geometry.sizes[node.id];
             const position = geometry.positions[node.id];
             positions.current.set(node.id, { ...position, ...size, parentId: node.parentId });
-            const summary = result.summaries.find((item) => item.nodeId === node.id);
-            const summaryText = summary
-              ? `${summary.distinctSymbols ?? 0} symbols · ${summary.sourceSites ?? summary.incoming + summary.outgoing} source sites${summary.hidden ? ` · ${summary.hidden} hidden` : ''}`
-              : '';
+            const presentation = nodePresentation(node, result, detailLevelRef.current);
+            const brackets = new Map<
+              string,
+              { id: string; name: string; range: string; x: number; y: number; height: number }
+            >();
+            for (const child of result.nodes.filter(
+              (child) => child.parentId === node.id && child.details?.sourceGroup,
+            )) {
+              const group = child.details!.sourceGroup!;
+              const at = geometry.positions[child.id];
+              const bottom = at.y + geometry.sizes[child.id].height;
+              const old = brackets.get(group.id);
+              const top = Math.min(old?.y ?? at.y, at.y);
+              brackets.set(group.id, {
+                id: group.id,
+                name: group.name,
+                range: `L${group.firstLine}–${group.endLine}`,
+                x: Math.min(old?.x ?? at.x - 18, at.x - 18),
+                y: top,
+                height: Math.max(old ? old.y + old.height : bottom, bottom) - top,
+              });
+            }
 
             return {
               id: node.id,
@@ -568,15 +643,21 @@ export default function App() {
               height: size.height,
               style: size,
               data: {
-                label: operationName(node),
+                ...presentation,
+                errorDecision: errorDecision(node, result),
+                level: detailLevelRef.current,
+                brackets: [...brackets.values()],
+                onEnter: canEnterCall(node) ? () => cardActions.current.enter(node) : undefined,
+                onExpand:
+                  node.kind === 'region' || node.kind === 'boundary'
+                    ? () => cardActions.current.expand(node)
+                    : undefined,
                 packageId: node.packageId,
-                newlyRevealed: newlyRevealed.has(node.id),
                 kind: node.kind,
                 grouped: grouped.has(node.id),
                 focused: node.id === result.focus,
-                summary: summaryText,
+                summary: presentation.description,
                 role: node.parentId ? (node.details?.role ?? node.kind) : undefined,
-                join: node.details?.join,
                 limitation: node.details?.limitation,
               },
             };
@@ -588,10 +669,13 @@ export default function App() {
             id: edge.id,
             source: edge.source,
             target: edge.target,
-            label: edgeLabel(edge),
+            label:
+              edge.kind === 'control' && ['', 'source order', 'return'].includes(edge.label)
+                ? undefined
+                : edgeLabel(edge),
             ariaLabel: `${nodeName(result.nodes, edge.source)} to ${nodeName(result.nodes, edge.target)}: ${edgeLabel(edge)}`,
             type: 'routed',
-            data: { route: geometry.routes[edge.id], rounded: grouped.size === 0 },
+            data: { route: geometry.routes[edge.id], rounded: true },
             className: edge.kind === 'control' ? 'control-edge' : 'dependency-edge',
             sourceHandle:
               edge.kind !== 'control' &&
@@ -640,7 +724,9 @@ export default function App() {
                   ) ?? recovered);
           }
           preserveRevealSource(item);
-          return item;
+          return (
+            item ?? (inspectionFromCallerRef.current && previous?.id === id ? previous : undefined)
+          );
         });
         if (pendingFlow.current) {
           const pending = pendingFlow.current;
@@ -711,22 +797,35 @@ export default function App() {
                 { duration: 0 },
               );
           } else if (initialNavigation) {
-            const size = geometry.sizes[result.focus];
+            const entryId = result.behaviors?.find(
+              (behavior) => behavior.symbolId === result.focus,
+            )?.entryId;
+            const entry = entryId ? result.nodes.find((node) => node.id === entryId) : undefined;
+            const focusId = entry?.id ?? result.focus;
+            const size = geometry.sizes[focusId];
+            const at = geometry.positions[focusId];
+            const parent = entry?.parentId ? geometry.positions[entry.parentId] : undefined;
             const bounds = canvas.current?.getBoundingClientRect();
             if (bounds)
               await flow.current.setViewport(
-                focusViewport(
-                  geometry.positions[result.focus],
-                  size.width,
-                  bounds,
-                  displayBounds(
-                    result.nodes.map((node) => ({
-                      parentId: node.parentId,
-                      position: geometry.positions[node.id],
-                      ...geometry.sizes[node.id],
-                    })),
-                  ),
-                ),
+                entry
+                  ? {
+                      x: bounds.width / 2 - (at.x + (parent?.x ?? 0) + size.width / 2),
+                      y: 48 - (at.y + (parent?.y ?? 0)),
+                      zoom: 1,
+                    }
+                  : focusViewport(
+                      { x: at.x + (parent?.x ?? 0), y: at.y + (parent?.y ?? 0) },
+                      size.width,
+                      bounds,
+                      displayBounds(
+                        result.nodes.map((node) => ({
+                          parentId: node.parentId,
+                          position: geometry.positions[node.id],
+                          ...geometry.sizes[node.id],
+                        })),
+                      ),
+                    ),
                 { duration: 0 },
               );
           }
@@ -817,6 +916,7 @@ export default function App() {
     },
   });
 
+  const savedCallerSelection = inspectionFromCaller;
   const selectedNode = selected && 'name' in selected ? selected : undefined;
   const selectedSummary = selectedNode
     ? view?.summaries.find((summary) => summary.nodeId === selectedNode.id)
@@ -897,6 +997,7 @@ export default function App() {
   }, [selected?.id, project?.snapshot, view?.snapshot, inspectorOpen, sourceError, inspect]);
 
   const select = (value: ViewNode | ViewEdge) => {
+    setInspectionFromCaller(false);
     if (sourceRecoveryBlocked.current) setSourceError('');
     sourceRecoveryBlocked.current = false;
     reopenSource.current = undefined;
@@ -999,7 +1100,7 @@ export default function App() {
     if (!request || busy) return;
     setOverviewFunctionId(id);
     if (request.internals.includes(id)) return;
-    change({ internals: [...new Set([...request.internals.slice(-15), id])] });
+    change({ internals: [...new Set([...request.internals.slice(-15), id])], kinds: [] });
   };
 
   const returnToStep = () => {
@@ -1078,7 +1179,15 @@ export default function App() {
   };
 
   const enterCall = (node: ViewNode) => {
-    if (!canEnterCall(node) || calls.length >= MAX_CALL_DEPTH || !view || busy) return;
+    if (
+      inspectionFromCaller ||
+      !canEnterCall(node) ||
+      calls.length >= MAX_CALL_DEPTH ||
+      !view ||
+      busy ||
+      !view.nodes.some((candidate) => candidate.id === node.id)
+    )
+      return;
     const frame = capture();
     if (!frame) return;
     setCalls([
@@ -1090,13 +1199,24 @@ export default function App() {
         sourceLine: node.source.line,
         targetId: node.relatedSymbolId!,
         continuationIds: successors(view, node.id).map((edge) => edge.target),
+        callerDetailLevel: detailLevelRef.current,
+        callerView: {
+          ...view,
+          nodes: view.nodes.filter(
+            (candidate) => candidate.id === node.parentId || candidate.parentId === node.parentId,
+          ),
+          edges: view.edges.filter((edge) => edge.kind === 'control'),
+        },
       },
     ]);
     navigate({
       ...requestFor(node.relatedSymbolId!, 'function', preferences.current.function),
       internals: [node.relatedSymbolId!],
+      kinds: [],
     });
-    pendingFlow.current = { functionId: node.relatedSymbolId! };
+    setOverviewFunctionId(node.relatedSymbolId!);
+    setHovered(undefined);
+    setPinned(false);
   };
 
   const returnToCaller = () => {
@@ -1350,6 +1470,32 @@ export default function App() {
     flushSync(() => setExplorerOpen(true));
   };
 
+  cardActions.current = { enter: enterCall, expand: reveal };
+  const changeDetailLevel = async (level: DetailLevel) => {
+    if (busy || level === detailLevel) return;
+    setDetailLevel(level);
+    detailLevelRef.current = level;
+    densityReflow.current = true;
+    if (!view) return;
+    restored.current = capture();
+    const current = latest.current.next();
+    setBusy(true);
+    try {
+      await paintView(view, current, performance.now());
+    } catch (error) {
+      if (current()) setError(String(error));
+    } finally {
+      if (current()) setBusy(false);
+    }
+  };
+
+  const selectionRelevant =
+    !!selected &&
+    !!view?.edges.some(
+      (edge) =>
+        edge.id === selected.id || edge.source === selected.id || edge.target === selected.id,
+    );
+
   const statusLabel = busy
     ? `${busyTask}…`
     : view
@@ -1591,91 +1737,137 @@ export default function App() {
                 Methods using this type, including receiver and signature uses.
               </p>
             )}
-            <button
-              disabled={!history.length || busy}
-              title={`Restore ${explorationDestination(history.at(-1))}`}
-              onClick={() => restoreExploration(history.length - 1)}
-            >
-              Previous exploration
-            </button>
-            <button
-              disabled={!future.length || busy}
-              title={`Restore ${explorationDestination(future.at(-1))}`}
-              onClick={() => {
-                const next = future.at(-1)!;
-                const frame = capture();
-                setFuture(future.slice(0, -1));
-                if (frame) setHistory([...history.slice(-19), frame]);
-                restore(next);
-              }}
-            >
-              Next exploration
-            </button>
-            <button
-              disabled={!view}
-              onClick={() => {
-                const focus = view?.nodes.find((node) => node.id === view.focus);
-                if (focus) showNode(focus);
-              }}
-            >
-              Center focus
-            </button>
-            <button
-              disabled={!view}
-              onClick={() => {
-                const bounds = displayBounds(
-                  nodes.map((node) => ({
-                    parentId: node.parentId,
-                    position: node.position,
-                    width: node.width ?? 220,
-                    height: node.height ?? 88,
-                  })),
-                );
+            <div className="detail-levels" role="group" aria-label="Detail level">
+              {([1, 2, 3] as const).map((level) => (
+                <button
+                  key={level}
+                  disabled={busy}
+                  aria-pressed={detailLevel === level}
+                  onClick={() => void changeDetailLevel(level)}
+                  title={
+                    ['Calls and control flow', 'Add descriptions', 'Add source ranges and types'][
+                      level - 1
+                    ]
+                  }
+                >
+                  {level} · {['Flow', 'Descriptions', 'Source'][level - 1]}
+                </button>
+              ))}
+            </div>
+            <details className="graph-more">
+              <summary>More</summary>
+              <div className="graph-more-popover">
+                <button
+                  disabled={!history.length || busy}
+                  title={`Restore ${explorationDestination(history.at(-1))}`}
+                  onClick={() => restoreExploration(history.length - 1)}
+                >
+                  Previous exploration
+                </button>
+                <button
+                  disabled={!future.length || busy}
+                  title={`Restore ${explorationDestination(future.at(-1))}`}
+                  onClick={() => {
+                    const next = future.at(-1)!;
+                    const frame = capture();
+                    setFuture(future.slice(0, -1));
+                    if (frame) setHistory([...history.slice(-19), frame]);
+                    restore(next);
+                  }}
+                >
+                  Next exploration
+                </button>
+                <button
+                  disabled={!view}
+                  onClick={() => {
+                    const focus = view?.nodes.find((node) => node.id === view.focus);
+                    if (focus) showNode(focus);
+                  }}
+                >
+                  Center focus
+                </button>
+                <button
+                  disabled={!view}
+                  onClick={() => {
+                    const bounds = displayBounds(
+                      nodes.map((node) => ({
+                        parentId: node.parentId,
+                        position: node.position,
+                        width: node.width ?? 220,
+                        height: node.height ?? 88,
+                      })),
+                    );
 
-                if (bounds) void flow.current?.fitBounds(bounds, { padding: 0.2 });
-              }}
-            >
-              Fit graph
-            </button>
-            <button
-              disabled={!canCollapseSelected || busy || !!impact}
-              title={
-                collapseName
-                  ? `Close ${collapseName}'s behavior and expanded neighbors only. Other branches stay open.`
-                  : 'Select an expanded declaration or its operation'
-              }
-              onClick={() => {
-                if (!request || !selectedNode) return;
-                pendingSelection.current = collapseTarget;
-                if (comparedFunction === collapseTarget) setOutcomeId(undefined);
-                change(collapseBranch(request, selectedNode), trail?.functionId !== collapseTarget);
-              }}
-            >
-              Collapse selected branch
-            </button>
-            <button
-              disabled={!request || busy || !!impact}
-              aria-expanded={resetPreview}
-              aria-controls="reset-preview"
-              title="Review what will close before resetting this exploration"
-              onClick={(event) => {
-                resetInvoker.current = event.currentTarget;
-                if (!resetPreview) transientOrder.current.reset = ++transientOrder.current.sequence;
-                setResetPreview(!resetPreview);
-              }}
-            >
-              Reset to focus
-            </button>
-            <button
-              disabled={!selected}
-              aria-expanded={inspectorOpen}
-              aria-controls="evidence-inspector"
-              onClick={openInspector}
-              aria-keyshortcuts="i"
-              title="Inspect selected item (I)"
-            >
-              Inspect
-            </button>
+                    if (bounds) void flow.current?.fitBounds(bounds, { padding: 0.2 });
+                  }}
+                >
+                  Fit graph
+                </button>
+                <button
+                  disabled={!canCollapseSelected || busy || !!impact}
+                  title={
+                    collapseName
+                      ? `Close ${collapseName}'s behavior and expanded neighbors only. Other branches stay open.`
+                      : 'Select an expanded declaration or its operation'
+                  }
+                  onClick={() => {
+                    if (!request || !selectedNode) return;
+                    pendingSelection.current = collapseTarget;
+                    if (comparedFunction === collapseTarget) setOutcomeId(undefined);
+                    change(
+                      collapseBranch(request, selectedNode),
+                      trail?.functionId !== collapseTarget,
+                    );
+                  }}
+                >
+                  Collapse selected branch
+                </button>
+                <button
+                  disabled={!request || busy || !!impact}
+                  aria-expanded={resetPreview}
+                  aria-controls="reset-preview"
+                  title="Review what will close before resetting this exploration"
+                  onClick={(event) => {
+                    resetInvoker.current = event.currentTarget;
+                    if (!resetPreview)
+                      transientOrder.current.reset = ++transientOrder.current.sequence;
+                    setResetPreview(!resetPreview);
+                  }}
+                >
+                  Reset to focus
+                </button>
+                <button
+                  disabled={!selected}
+                  aria-expanded={inspectorOpen}
+                  aria-controls="evidence-inspector"
+                  onClick={openInspector}
+                  aria-keyshortcuts="i"
+                  title="Inspect selected item (I)"
+                >
+                  Inspect
+                </button>
+                {connectionNode && connectionSummary && request && (
+                  <details className="connection-disclosure">
+                    <summary>Connections · {connectionSummary.hidden} hidden source sites</summary>
+                    <ConnectionSummary
+                      node={connectionNode}
+                      summary={connectionSummary}
+                      view={view!}
+                      request={request}
+                      busy={busy || !!impact}
+                      onChange={change}
+                      onRequest={(next) => navigate(next)}
+                    />
+                  </details>
+                )}
+                {view && (
+                  <details className="legend-disclosure">
+                    <summary>Graph key and analysis limits</summary>
+                    <GraphLegend view={view} />
+                  </details>
+                )}
+              </div>
+            </details>
             <span role="status">{statusLabel}</span>
           </div>
           {resetPreview && request && (
@@ -1720,7 +1912,13 @@ export default function App() {
               </div>
             </div>
           )}
-          {view && (
+          {focusNode && (
+            <div className="function-heading">
+              <code>{focusNode.signature || symbolName(focusNode)}</code>
+              <span>{focusNode.packageId}</span>
+            </div>
+          )}
+          {view && breadcrumbs.length > 0 && (
             <nav className="exploration-breadcrumb" aria-label="Exploration breadcrumb">
               <ol>
                 {breadcrumbs.map(({ frame, index }) => (
@@ -1738,7 +1936,7 @@ export default function App() {
               </ol>
             </nav>
           )}
-          {view && (
+          {view && (trail || continuationCallId) && (
             <div className="exploration-context" role="status">
               <span>Exploring {focusNode ? symbolName(focusNode) : view.focus}</span>
               {trail && (
@@ -1769,17 +1967,14 @@ export default function App() {
               )}
             </div>
           )}
-          {connectionNode && connectionSummary && request && (
-            <ConnectionSummary
-              node={connectionNode}
-              summary={connectionSummary}
-              view={view!}
-              request={request}
-              busy={busy || !!impact}
-              onChange={change}
-              onRequest={(next) => navigate(next)}
-            />
-          )}
+          {behaviorOpen &&
+            view?.behaviors?.find((behavior) => behavior.symbolId === request?.focus)
+              ?.totalNodes === 0 && (
+              <div className="notice" role="status">
+                Function flow is unavailable for this declaration. Use Calls or Callers to explore
+                available relationships; inspect Coverage for analysis limits.
+              </div>
+            )}
           {navigationNotice && (
             <div className="notice" role="status">
               {navigationNotice}
@@ -1799,204 +1994,229 @@ export default function App() {
               behavior and incomplete coverage may hide effects.
             </div>
           )}
-          <FlowNavigator
-            view={view}
-            request={request}
-            trail={trail}
-            calls={calls}
-            outcomeId={outcomeId}
-            outcomePartial={comparedPaths?.partial}
-            continuationCallId={continuationCallId}
-            busy={busy || !!impact}
-            keepStepCentered={keepStepCentered}
-            onKeepStepCentered={setKeepStepCentered}
-            onResume={() => {
-              if (trail && !busy) {
-                setTrail({ ...trail, paused: false });
-                returnToStep();
-              }
-            }}
-            onPause={() => {
-              if (trail && !busy) setTrail({ ...trail, paused: true });
-            }}
-            functionId={
-              comparedFunction ?? overviewFunctionId ?? (behaviorOpen ? request?.focus : undefined)
-            }
-            onStart={startFlow}
-            onStep={step}
-            onBack={previousStep}
-            onReveal={reveal}
-            onOutcome={compareOutcome}
-            onOutcomePage={(id, offset) =>
-              change({ outcomeOffsets: { ...request?.outcomeOffsets, [id]: offset } })
-            }
-            onReturn={returnToCaller}
-            onStop={() => {
-              setTrail(undefined);
-              setOutcomeId(undefined);
-              setContinuationCallId(undefined);
-            }}
-          />
-          <BranchHistory trail={trail} />
-          {view && <GraphLegend view={view} />}
-          <div
-            className={`canvas ${animateLayout ? 'layout-changing' : ''}`}
-            ref={canvas}
-            tabIndex={-1}
-            onFocusCapture={keyboardIdentity}
-            onKeyDownCapture={(event) => {
-              if (
-                event.key === 'Enter' &&
-                hovered &&
-                (event.target as HTMLElement).closest('[data-id]')
-              ) {
-                event.preventDefault();
-                select(hovered);
-              }
-            }}
-          >
-            <ReactFlow<SymbolNode>
-              nodes={nodes.map((node) => {
-                const paths = comparedPaths;
-                return {
-                  ...node,
-                  selected: selected?.id === node.id,
-                  className: `${node.data.newlyRevealed ? 'newly-revealed' : ''} ${emphasized.endpoints.has(node.id) ? 'connected-endpoint' : ''} ${activeOperation === node.id ? 'current-operation' : ''} ${paths && node.parentId && !paths.nodes.has(node.id) && !emphasized.endpoints.has(node.id) ? 'dimmed' : ''}`,
-                };
-              })}
-              edges={edges.map((edge) => {
-                const paths = comparedPaths;
-                const current = activeOperation;
-                return {
-                  ...edge,
-                  selected: selected?.id === edge.id,
-                  className: `${edge.className ?? ''} ${paths || selected ? (emphasized.edges.has(edge.id) ? 'connected-relationship' : 'dimmed') : ''} ${!paths && view?.edges.some((candidate) => candidate.id === edge.id && candidate.source === current && candidate.kind === 'control') ? 'next-operation' : ''}`,
-                };
-              })}
-              nodeTypes={nodeTypes}
-              edgeTypes={edgeTypes}
-              colorMode="dark"
-              onInit={(instance) => {
-                flow.current = instance;
-              }}
-              onNodesChange={onNodesChange}
-              onNodeClick={(event, node) => {
-                identityInvoker.current = (event.target as HTMLElement).closest<HTMLElement>(
-                  '[data-id]',
-                );
-                const fact = view?.nodes.find((value) => value.id === node.id);
-
-                if (fact) select(fact);
-              }}
-              onEdgeClick={(event, edge) => {
-                identityInvoker.current = (event.target as HTMLElement).closest<HTMLElement>(
-                  '[data-id]',
-                );
-                const fact = view?.edges.find((value) => value.id === edge.id);
-
-                if (fact) select(fact);
-              }}
-              onNodeMouseEnter={(_, node) =>
-                peek(view?.nodes.find((value) => value.id === node.id))
-              }
-              onNodeMouseLeave={() => peek()}
-              onEdgeMouseEnter={(_, edge) =>
-                peek(view?.edges.find((value) => value.id === edge.id))
-              }
-              onEdgeMouseLeave={() => peek()}
-              onNodeDoubleClick={(_, node) => {
-                const fact = view?.nodes.find((value) => value.id === node.id);
-
-                if (fact) {
-                  select(fact);
-                  openInspector();
+          <details className="flow-disclosure" open={!!trail || !!outcomeId}>
+            <summary>Follow a path{calls.length ? ` · ${calls.length} call levels` : ''}</summary>
+            <FlowNavigator
+              view={view}
+              request={request}
+              trail={trail}
+              calls={calls}
+              outcomeId={outcomeId}
+              outcomePartial={comparedPaths?.partial}
+              continuationCallId={continuationCallId}
+              busy={busy || !!impact}
+              keepStepCentered={keepStepCentered}
+              onKeepStepCentered={setKeepStepCentered}
+              onResume={() => {
+                if (trail && !busy) {
+                  setTrail({ ...trail, paused: false });
+                  returnToStep();
                 }
               }}
-              onEdgeDoubleClick={(_, edge) => {
-                const fact = view?.edges.find((value) => value.id === edge.id);
-                if (fact) {
-                  select(fact);
+              onPause={() => {
+                if (trail && !busy) setTrail({ ...trail, paused: true });
+              }}
+              functionId={
+                comparedFunction ??
+                overviewFunctionId ??
+                (behaviorOpen ? request?.focus : undefined)
+              }
+              onStart={startFlow}
+              onStep={step}
+              onBack={previousStep}
+              onReveal={reveal}
+              onOutcome={compareOutcome}
+              onOutcomePage={(id, offset) =>
+                change({ outcomeOffsets: { ...request?.outcomeOffsets, [id]: offset } })
+              }
+              onReturn={returnToCaller}
+              onStop={() => {
+                setTrail(undefined);
+                setOutcomeId(undefined);
+                setContinuationCallId(undefined);
+              }}
+            />
+            <BranchHistory trail={trail} />
+          </details>
+          <div className="graph-stage">
+            {calls.at(-1)?.callerView && (
+              <CallerPane
+                key={`${calls.length}:${calls.at(-1)!.callId}`}
+                frame={calls.at(-1)!}
+                level={detailLevel}
+                busy={busy}
+                onReturn={returnToCaller}
+                onInspect={(node) => {
+                  select(node);
+                  setInspectionFromCaller(true);
+                  openInspector();
+                }}
+              />
+            )}
+            <div
+              className={`canvas ${animateLayout ? 'layout-changing' : ''}`}
+              ref={canvas}
+              tabIndex={-1}
+              onFocusCapture={keyboardIdentity}
+              onKeyDownCapture={(event) => {
+                if (
+                  event.key === 'Enter' &&
+                  hovered &&
+                  (event.target as HTMLElement).closest('[data-id]') &&
+                  !(event.target as HTMLElement).closest('button, input, select, a')
+                ) {
+                  event.preventDefault();
+                  select(hovered);
                   openInspector();
                 }
-              }}
-              zoomOnDoubleClick={false}
-              nodesConnectable={false}
-              edgesReconnectable={false}
-              deleteKeyCode={null}
-              onlyRenderVisibleElements
-              minZoom={0.15}
-              maxZoom={2}
-              onPaneClick={() => {
-                setHovered(undefined);
-                setPinned(false);
               }}
             >
-              <Background gap={24} color="var(--border)" />
-              <Controls showInteractive={false} />
-              {nodes.length > 12 && <MiniMap pannable zoomable />}
-            </ReactFlow>
-            {(hovered || (pinned && selected)) && (
-              <div
-                onMouseEnter={() => {
-                  if (hoverTimer.current) clearTimeout(hoverTimer.current);
+              <ReactFlow<SymbolNode>
+                nodes={nodes.map((node) => {
+                  const paths = comparedPaths;
+                  return {
+                    ...node,
+                    selected: selected?.id === node.id,
+                    className: `${emphasized.endpoints.has(node.id) ? 'connected-endpoint' : ''} ${activeOperation === node.id ? 'current-operation' : ''} ${paths && node.parentId && !paths.nodes.has(node.id) && !emphasized.endpoints.has(node.id) ? 'dimmed' : ''}`,
+                  };
+                })}
+                edges={edges.map((edge) => {
+                  const paths = comparedPaths;
+                  const current = activeOperation;
+                  return {
+                    ...edge,
+                    selected: selected?.id === edge.id,
+                    className: `${edge.className ?? ''} ${paths || selectionRelevant ? (emphasized.edges.has(edge.id) ? 'connected-relationship' : 'dimmed') : ''} ${!paths && view?.edges.some((candidate) => candidate.id === edge.id && candidate.source === current && candidate.kind === 'control') ? 'next-operation' : ''}`,
+                  };
+                })}
+                nodeTypes={nodeTypes}
+                edgeTypes={edgeTypes}
+                colorMode="light"
+                onInit={(instance) => {
+                  flow.current = instance;
                 }}
-                onMouseLeave={() => peek()}
+                onNodesChange={onNodesChange}
+                onNodeClick={(event, node) => {
+                  identityInvoker.current = (event.target as HTMLElement).closest<HTMLElement>(
+                    '[data-id]',
+                  );
+                  const fact = view?.nodes.find((value) => value.id === node.id);
+
+                  if (fact) {
+                    select(fact);
+                    openInspector();
+                  }
+                }}
+                onEdgeClick={(event, edge) => {
+                  identityInvoker.current = (event.target as HTMLElement).closest<HTMLElement>(
+                    '[data-id]',
+                  );
+                  const fact = view?.edges.find((value) => value.id === edge.id);
+
+                  if (fact) select(fact);
+                }}
+                onNodeMouseEnter={(_, node) => {
+                  if (!view?.nodes.some((child) => child.parentId === node.id))
+                    peek(view?.nodes.find((value) => value.id === node.id));
+                }}
+                onNodeMouseLeave={() => peek()}
+                onEdgeMouseEnter={(_, edge) =>
+                  peek(view?.edges.find((value) => value.id === edge.id))
+                }
+                onEdgeMouseLeave={() => peek()}
+                onNodeDoubleClick={(_, node) => {
+                  const fact = view?.nodes.find((value) => value.id === node.id);
+
+                  if (fact) {
+                    select(fact);
+                    openInspector();
+                  }
+                }}
+                onEdgeDoubleClick={(_, edge) => {
+                  const fact = view?.edges.find((value) => value.id === edge.id);
+                  if (fact) {
+                    select(fact);
+                    openInspector();
+                  }
+                }}
+                zoomOnDoubleClick={false}
+                nodesConnectable={false}
+                edgesReconnectable={false}
+                deleteKeyCode={null}
+                onlyRenderVisibleElements
+                minZoom={0.15}
+                maxZoom={2}
+                onPaneClick={() => {
+                  setHovered(undefined);
+                  setPinned(false);
+                }}
               >
-                <IdentityCard
-                  value={hovered ?? selected!}
-                  nodes={view?.nodes ?? []}
-                  pinned={pinned && selected?.id === (hovered ?? selected)?.id}
-                  onPin={() => {
-                    const value = hovered ?? selected;
-                    if (value) select(value);
+                <Background gap={32} color="var(--border)" />
+                <Controls showInteractive={false} />
+              </ReactFlow>
+              {(hovered || (pinned && selected)) && (
+                <div
+                  onMouseEnter={() => {
+                    if (hoverTimer.current) clearTimeout(hoverTimer.current);
                   }}
-                  onInspect={() => {
-                    const value = hovered ?? selected;
-                    if (value) {
-                      select(value);
-                      openInspector();
-                    }
-                  }}
-                  onDismiss={dismissIdentity}
-                />
-              </div>
-            )}
-            {!view && !busy && (
-              <div className="empty">
-                Explore calls, data relationships, and static function behavior.
-                <br />
-                {project ? (
-                  <>
-                    <p>
-                      Choose a declaration in Find any symbol. Packages and types are starting
-                      points for libraries.
-                    </p>
+                  onMouseLeave={() => peek()}
+                >
+                  <IdentityCard
+                    value={hovered ?? selected!}
+                    nodes={view?.nodes ?? []}
+                    pinned={pinned && selected?.id === (hovered ?? selected)?.id}
+                    onPin={() => {
+                      const value = hovered ?? selected;
+                      if (value) select(value);
+                    }}
+                    onInspect={() => {
+                      const value = hovered ?? selected;
+                      if (value) {
+                        select(value);
+                        openInspector();
+                      }
+                    }}
+                    onDismiss={dismissIdentity}
+                  />
+                </div>
+              )}
+              {!view && !busy && (
+                <div className="empty">
+                  Explore calls, data relationships, and static function behavior.
+                  <br />
+                  {project ? (
+                    <>
+                      <p>
+                        Choose a declaration in Find any symbol. Packages and types are starting
+                        points for libraries.
+                      </p>
+                      <button
+                        onClick={() => {
+                          showExplorer();
+                          searchInput.current?.focus();
+                        }}
+                      >
+                        Find a starting point
+                      </button>
+                    </>
+                  ) : (
                     <button
                       onClick={() => {
-                        showExplorer();
-                        searchInput.current?.focus();
+                        if (isDesktop)
+                          void chooseProjectFolder()
+                            .then((path) => {
+                              if (path) void loadProject(false, path);
+                            })
+                            .catch((error) => setError(String(error)));
+                        else void loadProject();
                       }}
                     >
-                      Find a starting point
+                      {isDesktop ? 'Open folder' : 'Open sample'}
                     </button>
-                  </>
-                ) : (
-                  <button
-                    onClick={() => {
-                      if (isDesktop)
-                        void chooseProjectFolder()
-                          .then((path) => {
-                            if (path) void loadProject(false, path);
-                          })
-                          .catch((error) => setError(String(error)));
-                      else void loadProject();
-                    }}
-                  >
-                    {isDesktop ? 'Open folder' : 'Open sample'}
-                  </button>
-                )}
-              </div>
-            )}
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </main>
         <aside
@@ -2013,13 +2233,19 @@ export default function App() {
           <button className="source-width" onClick={() => setWideSource(!wideSource)}>
             {wideSource ? 'Compact source panel' : 'Widen source panel'}
           </button>
+          {savedCallerSelection && (
+            <p className="notice">
+              Inspecting saved caller evidence. Return to caller to navigate or expand this
+              occurrence.
+            </p>
+          )}
           <EvidenceInspector
             selected={selected}
             summary={selectedSummary}
             view={view}
             request={request}
             root={project?.root}
-            busy={busy}
+            busy={busy || savedCallerSelection}
             impact={impact}
             excerpt={excerpt}
             evidence={evidence}

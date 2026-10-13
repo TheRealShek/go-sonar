@@ -272,3 +272,27 @@ it('fits a production-sized uneven call fan-out in the available canvas without 
   checkGeometry(request, result);
   checkRoutes(request, result);
 });
+
+it('routes an error guard sideways and its continuation downward', async () => {
+  const request: LayoutRequest = {
+    nodes: [
+      node('function', { width: 0, height: 0 }),
+      node('guard', { parentId: 'function', role: 'condition', errorDecision: true }),
+      node('failure', { parentId: 'function', role: 'return', width: 240, height: 38 }),
+      node('continue', { parentId: 'function', role: 'call' }),
+    ],
+    edges: [
+      { id: 'yes', source: 'guard', target: 'failure', kind: 'control', label: 'true' },
+      { id: 'no', source: 'guard', target: 'continue', kind: 'control', label: 'false' },
+    ],
+  };
+  const result = await calculateLayout(request, new ELK());
+  const guard = result.positions.guard;
+  const parent = result.positions.function;
+  const yes = result.routes.yes.sections[0][0];
+  const no = result.routes.no.sections[0][0];
+  expect(yes.x).toBeCloseTo(parent.x + guard.x + result.sizes.guard.width);
+  expect(no.y).toBeCloseTo(parent.y + guard.y + result.sizes.guard.height);
+  checkGeometry(request, result);
+  checkRoutes(request, result);
+});

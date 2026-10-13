@@ -14,6 +14,7 @@ import (
 
 type extractor struct {
 	pkg     *packages.Package
+	origins map[string]string
 	facts   Facts
 	ids     map[types.Object]string
 	symbols map[string]bool
@@ -136,6 +137,7 @@ func (x *extractor) symbol(obj types.Object, n ast.Node, doc string) string {
 		QualifiedName: id,
 		Kind:          kind,
 		PackageID:     pkg,
+		Origin:        x.origins[pkg],
 		Source:        source,
 		Signature:     signature,
 		Documentation: doc,
@@ -145,9 +147,10 @@ func (x *extractor) symbol(obj types.Object, n ast.Node, doc string) string {
 	return id
 }
 
-func extract(p *packages.Package) Facts {
+func extract(p *packages.Package, origins map[string]string) Facts {
 	x := &extractor{
 		pkg:     p,
+		origins: origins,
 		ids:     map[types.Object]string{},
 		symbols: map[string]bool{},
 		parents: map[ast.Node]ast.Node{},
