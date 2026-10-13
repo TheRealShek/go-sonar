@@ -18,4 +18,4 @@ The project reuses Go's language tooling and existing graph UI libraries. It als
 
 Incremental reuse, consistent publication, bounded queries, and explicit failure handling are required. Performance measurements must include Rust, Go, toolchain children, and WebView processes. The language choice alone provides no performance guarantee.
 
-The layout adapter can change without altering source identities, relationship meanings, or index storage. See [Architecture](../architecture.md) for component responsibilities and [Performance requirements](../performance.md) for verification rules.
+The approved [minimal UI presentation](../ui-design.md) changes visual density, source-region rendering, and detail levels within these boundaries. It does not change the desktop/analyzer ownership decision. The layout adapter can change without altering source identities, relationship meanings, or index storage. See [Architecture](../architecture.md) for component responsibilities and [Performance requirements](../performance.md) for verification rules.

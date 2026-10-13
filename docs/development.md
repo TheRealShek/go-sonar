@@ -32,7 +32,7 @@ cargo fmt --all -- --check
 npm run format:check
 ```
 
-Choose checks appropriate to the change. Frontend build and tests do not verify the native WebKit worker or analyzer transport. Use a native desktop check for changes to those boundaries. The historical [validation record](validation.md) is not a substitute for checking a new revision.
+Check the three [approved screens](ui-design.md) and record implementation status separately from prototype rendering. Every Go Sonar change must also exercise the real Go analyzer and Rust backend against `/Drive2/Coding_Skills/Projects/llmgate`, without editing that target. Compare its files and existing work before and after verification. Choose checks appropriate to the change. Frontend build and tests do not verify the native WebKit worker or analyzer transport. Use a native desktop check for changes to those boundaries. The historical [validation record](validation.md) is not a substitute for checking a new revision.
 
 To build the release desktop without installer packaging:
 

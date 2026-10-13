@@ -4,6 +4,8 @@ Go Sonar helps you inspect Go declarations, their relationships, and the static 
 
 For installation and startup, see [Run locally](../README.md#run-locally).
 
+The [approved minimal UI design](ui-design.md) is the target for the next implementation. This documentation checkpoint records the design before changing the app; control names below describe existing capabilities until native verification confirms the redesign. The approved screenshots are prototypes, not desktop captures.
+
 ## Open a project
 
 Open the project menu in the top bar, choose **Open folder**, select a directory containing `go.mod`, and analysis starts immediately. Choosing a **Recent project** also opens it immediately. You can instead enter an absolute path and choose **Open**. The empty canvas offers **Open folder** directly.
@@ -16,7 +18,7 @@ After loading, open **Coverage** in the top bar to review the coverage summary a
 
 Use **Find any symbol** to search by declaration name, such as `Get`, and narrow the same result list by package and kind. Methods include their receiver, such as `Cache.Get`. The list shows the total match count and offers pages of results. Arrow keys choose a result and Enter opens it. With an empty query, executable modules offer entry points; libraries offer package and type starting points.
 
-The initial relationship choices depend on the symbol. Functions start with outgoing calls, fields with incoming reads and writes, and types with incoming construction and type-related uses. The initial neighbor budget is eight connections. Preferences carry over within the same declaration category when you refocus.
+The approved default for functions is Flow when behavior is available, with Calls and Callers still accessible. Fields retain incoming reads and writes; types retain construction and type-related uses. At this design checkpoint, the existing desktop still opens function calls first. The initial neighbor budget is eight connections. Preferences carry over within the same declaration category when you refocus.
 
 ## Explore relationships
 
@@ -36,9 +38,9 @@ Connections with the same endpoints and relationship kind summarize repeated sou
 
 Use package and relationship groups to narrow one symbol's neighbors. The action names the direction, relationship, and package; other expansion seeds keep their filters. Remove its filter chip above the graph, or use **Show all packages** in the inspector, to restore the global filters. **Previous neighbors** and **Next neighbors** reveal other pages. Counts distinguish connections hidden by filters, collapse, pagination, and view limits. Hidden counts are not proof of missing code, and a small visible graph is not the full set of known relationships.
 
-## Keep your place
+## Keep your place in the current desktop
 
-Toggle **Symbols** to hide or show discovery and relationship filters. **Filters** keeps relationship settings collapsed until needed. The application and native window use a dark Nord palette.
+Toggle **Symbols** to hide or show discovery and relationship filters. **Filters** keeps relationship settings collapsed until needed. The current desktop uses the earlier dark presentation. The approved warm light presentation is pending implementation.
 
 Call neighborhoods use compact horizontal columns with at most three nodes per layer. The initial view fits the neighborhood when labels remain at least 80% of their normal size; larger neighborhoods center the focus at normal size. Column position does not imply execution order. The minimap appears above 12 nodes.
 
@@ -60,13 +62,15 @@ Connection summaries, reset actions, and pagination are available above the grap
 
 The legend beside the canvas describes the relationships in the current view. Selecting a node emphasizes its connections and their endpoints; selecting an edge emphasizes its two endpoints. Unrelated edges dim. Relationship names remain visible. Dashed edges with **? possible** indicate uncertainty, solid return routes with **loop back** mark repetition, and **N source sites** counts repeated source occurrences. These marks describe source structure, not runtime observations.
 
+The approved replacement for these presentation controls is specified in [Minimal function exploration](ui-design.md). Detail levels, bracketed regions, and the three-screen layout are design targets until implementation is verified.
+
 ## Follow a function
 
 Select a function or method and choose **Open behavior** to reveal internal operations inside its function group. **Start walkthrough** starts at the analyzed entry. **Pause walkthrough** keeps your progress, **Resume walkthrough** continues it, and **Restart walkthrough** explicitly returns to the entry. **Stop following** discards the path without closing the graph. Selecting Flow again preserves progress. Selecting a relationship question pauses the walkthrough; Resume reopens it at the saved operation. The current operation and available successors appear in the flow controls.
 
 At a condition, each choice pairs the condition with its destination expression, such as **err != nil → return Item{}, err** or **Otherwise → Normalize(item)**. Loop choices also name their destination. The compact branch-history strip stays beside the canvas, outside the scrolling flow controls. The step counter shows your current step; the 120-step safety limit appears when reached. **Previous step** revisits the prior operation; its tooltip names that destination. **Return to caller** restores the saved call frame and names the caller and originating expression in its tooltip.
 
-Long functions use collapsed regions and explicit boundaries. **Reveal region** or **Reveal next region** opens more detail. Disclosure anchors the selected operation or region and its owning function. Other nodes move around these landmarks when space is needed, with a short transition and **New** badges on revealed nodes. Reduced motion disables the transition. When the shared view budget replaces earlier detail, a notice explains the change; **Previous exploration** restores it. If a boundary is unsupported, inspect its limitation rather than assuming a continuation.
+Long functions use collapsed regions and explicit boundaries. **Reveal region** or **Reveal next region** opens more detail. Disclosure anchors the selected operation or region and its owning function. Other nodes move around these landmarks when space is needed, with a short transition that reduced-motion preferences disable. When the shared view budget replaces earlier detail, a notice explains the change; **Previous exploration** restores it. If a boundary is unsupported, inspect its limitation rather than assuming a continuation.
 
 Following a branch does not prove that any real input satisfies all chosen conditions. The app does not execute the function. Flow navigation stops at 120 steps to keep loops bounded.
 

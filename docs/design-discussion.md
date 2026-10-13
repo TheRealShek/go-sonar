@@ -4,13 +4,13 @@ This record explains the confirmed product choices. A working implementation now
 
 ## Graph as the main interface
 
-Users start at any symbol and expand incoming or outgoing relationships. A small initial neighborhood and explicit reveal actions keep large codebases readable. Connections need meanings, source evidence, and explanations of hidden detail.
+Users can start at any symbol. Functions start with readable local flow when behavior is available; relationship exploration remains available for callers, fields, types, and values. Explicit reveal actions and meaningful hidden counts keep large codebases readable. The [approved minimal UI design](ui-design.md) defines the presentation.
 
 This supports libraries as well as executables. It avoids requiring every investigation to begin at `main` or display a complete repository graph.
 
 ## Function internals stay grouped
 
-Expand behavior inside a collapsible function subgraph. Conditions, operations, transformations, and returns stay together while preserving connections to surrounding declarations.
+Keep conditions, operations, transformations, and returns associated with their function while preserving external relationships. Expanded source regions use labeled left-edge brackets, rather than enclosing cards. Collapsed regions use pills with analyzed child counts. The index and layout can retain parent groups without rendering them as large visual cards.
 
 Grouping retains context when crossing between a function's internals and external relationships. The cost is more complex layout and routing across group boundaries. Focus controls and region expansion provide room without requiring a separate exploration model.
 
@@ -52,6 +52,6 @@ Benchmarks must include indexing, request-to-render expansion, and simultaneous 
 
 ## Decisions still open
 
-Further work needs to establish release performance budgets, representative production workloads, and usability results. Layout tuning, relevance ranking, broader analysis coverage, and build-configuration controls need verification against those workloads.
+The minimal presentation is approved, including name-only default nodes, one signature line, three detail levels, and all three main screens. Implementation and usability results remain pending. Release performance budgets, relevance ranking, broader coverage, and build-configuration controls still need verification against representative workloads.
 
 Routine tuning and reversible library choices belong in the architecture, implementation, and performance documents. Add a new decision record when a durable boundary or product choice changes.

@@ -4,6 +4,8 @@ These terms describe Go Sonar's product and graph model. A definition describes 
 
 ## Code and evidence
 
+Declaration kind and code origin are independent. A method is a Go function with a receiver. Project, standard-library, and dependency code can define both functions and methods. Signatures show a receiver only when present, plus parameters and results. Go Sonar descriptions and source groups are presentation labels, not additional Go declaration kinds. See the [approved UI design](docs/ui-design.md).
+
 | Term                   | Meaning                                                                                                                                                                 |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Codebase               | The source and supporting project material being explored. The current app opens one Go module.                                                                         |

@@ -1,0 +1,1242 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Go Sonar flow preview</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: var(--font-sans, Inter, system-ui, sans-serif);
+        color: var(--foreground, #18232b);
+      }
+      .intro {
+        font-size: 13px;
+        line-height: 1.6;
+        color: var(--muted-foreground, #68747b);
+        margin: 0 0 12px;
+      }
+      .app {
+        background: #fafaf7;
+        color: #23333b;
+        border-radius: var(--radius, 10px);
+        padding: 16px;
+        overflow: hidden;
+      }
+      button {
+        font: inherit;
+        color: inherit;
+        cursor: pointer;
+      }
+      button:focus-visible {
+        outline: 2px solid #14868a;
+        outline-offset: 3px;
+      }
+      .top {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        padding-bottom: 14px;
+        border-bottom: 1px solid #e5e8e6;
+        font-size: 12px;
+      }
+      .brand {
+        font-weight: 700;
+        font-size: 16px;
+      }
+      .project {
+        color: #6e7a80;
+      }
+      .search {
+        margin-left: auto;
+        color: #879196;
+      }
+      .function {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 17px 0 13px;
+        flex-wrap: wrap;
+      }
+      .signature {
+        font: 14px var(--font-mono, ui-monospace, monospace);
+        font-weight: 550;
+      }
+      .package {
+        color: #748086;
+        font-size: 12px;
+      }
+      .toolbar {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+        padding-bottom: 12px;
+        border-bottom: 1px solid #e5e8e6;
+      }
+      .tabs,
+      .levels,
+      .examples {
+        display: flex;
+        gap: 2px;
+      }
+      .tabs button,
+      .levels button,
+      .examples button {
+        border: 0;
+        background: transparent;
+        padding: 6px 9px;
+        border-radius: 4px;
+        font-size: 12px;
+        white-space: nowrap;
+      }
+      .tabs .active {
+        color: #0d797e;
+        font-weight: 650;
+        background: #e7f1ef;
+      }
+      .examples button[aria-pressed='true'] {
+        background: #e7ece9;
+        font-weight: 600;
+      }
+      .levels {
+        margin-left: auto;
+        background: #eef0ed;
+        border-radius: 5px;
+        padding: 2px;
+      }
+      .levels button[aria-pressed='true'] {
+        background: #fff;
+        box-shadow: 0 1px 2px #18282b10;
+        font-weight: 650;
+      }
+      .label {
+        font-size: 11px;
+        color: #758186;
+      }
+      .back {
+        border: 0;
+        background: transparent;
+        color: #0c7d82;
+        font-size: 12px;
+        padding: 0 8px 0 0;
+      }
+      .workspace {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 250px;
+        gap: 16px;
+      }
+      .graph {
+        min-width: 0;
+        padding-top: 12px;
+      }
+      .graphbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .graphbar button {
+        border: 0;
+        background: transparent;
+        color: #6d7d82;
+        font-size: 11px;
+        padding: 4px 0;
+      }
+      .hint {
+        font-size: 11px;
+        color: #849095;
+      }
+      .scroller {
+        height: 555px;
+        overflow: auto;
+        scrollbar-width: thin;
+        scrollbar-color: #d5dcd8 transparent;
+      }
+      .scroller svg {
+        display: block;
+        width: 100%;
+        min-width: 640px;
+        overflow: visible;
+      }
+      .graphfooter {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding-top: 8px;
+        font-size: 10px;
+        color: #8c9699;
+      }
+      .graphfooter button {
+        border: 0;
+        background: transparent;
+        font-size: 11px;
+        color: #738087;
+        padding: 4px;
+      }
+      .inspector {
+        border-left: 1px solid #e5e8e6;
+        padding: 17px 0 0 16px;
+        min-width: 0;
+      }
+      .inspecttop {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .eyebrow {
+        font-size: 10px;
+        color: #7e8b90;
+        letter-spacing: 0.07em;
+        text-transform: uppercase;
+      }
+      .inspecttop button {
+        border: 0;
+        background: transparent;
+        padding: 2px;
+        color: #829196;
+      }
+      .inspector h2 {
+        font-size: 17px;
+        margin: 12px 0 5px;
+        overflow-wrap: anywhere;
+      }
+      .origin {
+        font-size: 11px;
+        color: #76868c;
+      }
+      .description {
+        font-size: 12px;
+        line-height: 1.65;
+        color: #596d76;
+        margin: 16px 0;
+      }
+      .location {
+        font: 11px var(--font-mono, ui-monospace, monospace);
+        color: #79888f;
+        margin-bottom: 12px;
+      }
+      .source {
+        font: 11px/1.7 var(--font-mono, ui-monospace, monospace);
+        background: #f2f4f0;
+        border-radius: 5px;
+        padding: 12px;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        margin: 0;
+      }
+      .source .selectedline {
+        display: block;
+        background: #dff0ed;
+        margin: 0 -7px;
+        padding: 0 7px;
+        color: #165d63;
+      }
+      .types {
+        font: 11px/1.7 var(--font-mono, ui-monospace, monospace);
+        white-space: pre-wrap;
+        margin-top: 14px;
+        color: #697d85;
+      }
+      .context {
+        margin-top: 18px;
+        font-size: 11px;
+        line-height: 1.6;
+        color: #7a898e;
+      }
+      .unknown {
+        color: #9f771a;
+        font-size: 11px;
+        margin: 10px 0;
+      }
+      .node {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        height: 100%;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        background: #f0f2ee;
+        padding: 5px 10px;
+        gap: 7px;
+        font-family: var(--font-sans, Inter, system-ui, sans-serif);
+        color: #2b424b;
+        text-align: center;
+        font-size: 14px;
+      }
+      .node:hover,
+      .node:focus-visible {
+        background: #e7eeea;
+      }
+      .node.selected {
+        background: #e1f0ec;
+        border-color: #539ca0;
+      }
+      .node.decision {
+        background: transparent;
+        border: 0;
+      }
+      .node.return {
+        background: #f1f3ef;
+      }
+      .node.error {
+        background: #fbeeed;
+        color: #a54843;
+        border: 0;
+        border-radius: 22px;
+        font-size: 12px;
+      }
+      .node.group {
+        border-radius: 24px;
+        background: #edf0eb;
+        font-size: 13px;
+        justify-content: center;
+      }
+      .ntext {
+        min-width: 0;
+      }
+      .name {
+        display: block;
+        white-space: nowrap;
+      }
+      .detail {
+        display: block;
+        font-size: 11px;
+        color: #7b8c91;
+        line-height: 1.5;
+        margin-top: 5px;
+      }
+      .sourcehint {
+        display: block;
+        font: 10px/1.5 var(--font-mono, ui-monospace, monospace);
+        color: #8a989c;
+        margin-top: 3px;
+      }
+      .tag {
+        font-size: 10px;
+        color: #89979c;
+        font-weight: 400;
+      }
+      .defermark {
+        color: #98741c;
+        font-size: 10px;
+        letter-spacing: 0.02em;
+      }
+      .unknownmark {
+        color: #a68431;
+        font-size: 12px;
+      }
+      .hoveraction {
+        position: absolute;
+        right: 5px;
+        top: 50%;
+        transform: translateY(-50%);
+        opacity: 0;
+        color: #3e8586;
+        font-size: 11px;
+        background: #edf4ef;
+        padding: 3px 4px;
+        border-radius: 3px;
+      }
+      .node:hover .hoveraction,
+      .node:focus-visible .hoveraction {
+        opacity: 1;
+      }
+      .edge {
+        fill: none;
+        stroke: #a6b8bb;
+        stroke-width: 1.5;
+        stroke-linejoin: round;
+      }
+      .edge.error {
+        stroke: #c77b75;
+      }
+      .bracket {
+        fill: none;
+        stroke: #c9d4d0;
+        stroke-width: 1.2;
+      }
+      .grouplabel {
+        font-size: 11px;
+        fill: #8a9699;
+      }
+      .branchlabel {
+        font-size: 11px;
+        fill: #70878b;
+      }
+      .tip {
+        position: fixed;
+        z-index: 20;
+        width: 265px;
+        background: #fff;
+        color: #2d414a;
+        border: 1px solid #e1e7e3;
+        border-radius: 8px;
+        padding: 13px;
+        box-shadow: 0 6px 20px #20343112;
+        pointer-events: none;
+        display: none;
+        font-size: 12px;
+        line-height: 1.55;
+      }
+      .tip strong {
+        display: block;
+        font-size: 13px;
+        margin-bottom: 5px;
+      }
+      .tip .tipmeta {
+        font-size: 10px;
+        color: #829096;
+        margin-top: 7px;
+      }
+      .tip code {
+        font: 11px var(--font-mono, ui-monospace, monospace);
+        overflow-wrap: anywhere;
+      }
+      .note {
+        font-size: 12px;
+        color: var(--muted-foreground, #77868b);
+        line-height: 1.6;
+        margin: 12px 0 0;
+      }
+      .hidden {
+        display: none !important;
+      }
+      .workspace.detailsclosed {
+        grid-template-columns: 1fr;
+      }
+      .detailsbutton {
+        border: 0;
+        background: transparent;
+        font-size: 11px;
+        color: #718a90;
+      }
+      .workspace {
+        grid-template-columns: minmax(0, 1fr) 300px;
+      }
+      .scroller {
+        height: 610px;
+      }
+      .graphbar button {
+        margin-left: 12px;
+      }
+      #groupToggle {
+        opacity: 0;
+      }
+      .graphbar:hover #groupToggle,
+      .graphbar:focus-within #groupToggle {
+        opacity: 1;
+      }
+      .groupControl {
+        opacity: 0;
+      }
+      .groupControl:hover,
+      .groupControl:focus-visible {
+        opacity: 1;
+      }
+      @media (max-width: 920px) {
+        .workspace {
+          grid-template-columns: 1fr;
+        }
+        .inspector {
+          border-left: 0;
+          border-top: 1px solid #e5e8e6;
+          padding: 15px 0 0;
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 0 18px;
+        }
+        .inspecttop,
+        .inspector h2,
+        .origin {
+          grid-column: 1;
+        }
+        .description {
+          grid-column: 1;
+        }
+        .location,
+        .source,
+        .types {
+          grid-column: 2;
+        }
+        .location {
+          grid-row: 1;
+        }
+        .source {
+          grid-row: 2 / span 4;
+        }
+        .types {
+          grid-row: 6;
+        }
+        .context,
+        .unknown {
+          grid-column: 1;
+        }
+        .scroller {
+          height: 590px;
+        }
+        .search {
+          display: none;
+        }
+      }
+      @media (max-width: 520px) {
+        .signature {
+          font-size: 11px;
+        }
+        .app {
+          padding: 16px;
+        }
+        .levels {
+          margin-left: 0;
+        }
+        .toolbar {
+          gap: 7px;
+        }
+        .inspector {
+          display: block;
+        }
+        .scroller {
+          height: 460px;
+        }
+        .intro {
+          font-size: 12px;
+        }
+        .hint {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <p class="intro">
+      Try the detail levels, expand a group, and select or hover over a node. Names stay concise;
+      explanations appear when needed.
+    </p>
+    <div class="app">
+      <header class="top">
+        <span class="brand">Go Sonar</span><span class="project" id="project">llmgate</span
+        ><span class="search">Find a function…</span><span aria-hidden="true">↻</span>
+      </header>
+      <div class="function">
+        <button id="back" class="back hidden" onclick="setView('get')">← Service.Get</button
+        ><code class="signature" id="signature"></code><span class="package" id="package"></span>
+      </div>
+      <div class="toolbar">
+        <div class="tabs"><button class="active" aria-current="page">Flow</button></div>
+        <span class="label">Example</span>
+        <div class="examples">
+          <button onclick="setView('run')" id="example-run">run</button
+          ><button onclick="setView('get')" id="example-get">Service.Get</button>
+        </div>
+        <div class="levels" aria-label="Detail level">
+          <button id="level-1" onclick="setLevel(1)">1 · Flow</button
+          ><button id="level-2" onclick="setLevel(2)">2 · Descriptions</button
+          ><button id="level-3" onclick="setLevel(3)">3 · Source + types</button>
+        </div>
+      </div>
+      <div class="workspace" id="workspace">
+        <main class="graph">
+          <div class="graphbar">
+            <span class="hint" id="hint"></span>
+            <div>
+              <button id="groupToggle" onclick="toggleGroups()">Expand groups</button
+              ><button class="detailsbutton" onclick="toggleDetails()">Details</button>
+            </div>
+          </div>
+          <div class="scroller" id="scroll">
+            <svg id="diagram" aria-label="Static source flow" role="group"></svg>
+          </div>
+          <div class="graphfooter">
+            <span>Static source flow · no recorded execution</span
+            ><button onclick="document.getElementById('scroll').scrollTop = 0">
+              Back to start ↑
+            </button>
+          </div>
+        </main>
+        <aside class="inspector" id="inspector">
+          <div class="inspecttop">
+            <span class="eyebrow">Selected node</span
+            ><button onclick="toggleDetails()" aria-label="Hide details">×</button>
+          </div>
+          <h2 id="selectedName"></h2>
+          <div class="origin" id="selectedKind"></div>
+          <p class="description" id="selectedDescription"></p>
+          <div class="location" id="selectedLocation"></div>
+          <pre class="source" id="selectedSource"></pre>
+          <pre class="types" id="selectedTypes"></pre>
+          <p class="unknown hidden" id="selectedUnknown">Concrete implementation is unknown.</p>
+          <div class="context" id="selectedContext"></div>
+        </aside>
+      </div>
+    </div>
+    <div class="tip" id="tip" role="tooltip"></div>
+    <p class="note">
+      Design preview based on inspected source, with illustrative group counts. Group ranges appear
+      at level 3. Groups with no calls are omitted from level 1. This preview does not run the
+      analyzer or modify either project.
+    </p>
+    <script>
+      const data = {
+        load: {
+          name: 'loadConfig',
+          kind: 'Function',
+          origin: 'Project',
+          desc: 'Loads gateway configuration using the supplied environment reader.',
+          loc: 'cmd/gateway/run.go:18',
+          types: 'func loadConfig(getenv func(string) string) (config, error)',
+          source:
+            'cfg, err := loadConfig(os.Getenv)\nif err != nil {\n    return fmt.Errorf("load gateway config: %w", err)\n}',
+          line: 'cfg, err := loadConfig(os.Getenv)',
+        },
+        clone: {
+          name: 'Clone',
+          kind: 'Method',
+          origin: 'Standard library',
+          desc: 'Clones the default HTTP transport before its settings are changed.',
+          loc: 'cmd/gateway/run.go:26',
+          types: 'func (t *http.Transport) Clone() *http.Transport',
+          source: 'transport := http.DefaultTransport.(*http.Transport).Clone()',
+        },
+        cleanup: {
+          name: 'CloseIdleConnections',
+          kind: 'Deferred call registration',
+          origin: 'Standard library',
+          desc: 'Registers transport cleanup to run when run returns. This node registers the defer; it does not run cleanup immediately.',
+          loc: 'cmd/gateway/run.go:31',
+          types: 'func (t *http.Transport) CloseIdleConnections()',
+          source: 'defer transport.CloseIdleConnections()',
+          defer: 'transport.CloseIdleConnections()',
+        },
+        upstream: {
+          name: 'cfg.upstreamURL != nil',
+          kind: 'Condition',
+          origin: 'Source expression',
+          desc: 'Checks whether an upstream URL is configured. The no branch skips handler construction and rejoins at gateway.NewHandler.',
+          loc: 'cmd/gateway/run.go:39',
+          source:
+            'if cfg.upstreamURL != nil {\n    nonStreaming = proxy.NewNonStreamingHandler(...)\n    streaming = proxy.NewStreamingHandler(...)\n    readiness = backend.NewReadinessHandler(...)\n}',
+        },
+        nonstream: {
+          name: 'proxy.NewNonStreamingHandler',
+          kind: 'Function',
+          origin: 'Project',
+          desc: 'Creates the non-streaming handler when an upstream is configured.',
+          loc: 'cmd/gateway/run.go:40',
+          source:
+            'nonStreaming = proxy.NewNonStreamingHandler(\n    cfg.upstreamURL, transport, cfg.upstreamTimeout,\n)',
+        },
+        stream: {
+          name: 'proxy.NewStreamingHandler',
+          kind: 'Function',
+          origin: 'Project',
+          desc: 'Creates the streaming handler when an upstream is configured.',
+          loc: 'cmd/gateway/run.go:41',
+          source:
+            'streaming = proxy.NewStreamingHandler(\n    cfg.upstreamURL, transport, cfg.streamIdleTimeout,\n)',
+        },
+        readiness: {
+          name: 'backend.NewReadinessHandler',
+          kind: 'Function',
+          origin: 'Project',
+          desc: 'Creates the readiness handler when an upstream is configured.',
+          loc: 'cmd/gateway/run.go:42',
+          source:
+            'readiness = backend.NewReadinessHandler(\n    cfg.upstreamURL, transport, cfg.readinessTimeout,\n)',
+        },
+        routes: {
+          name: 'gateway.NewHandler',
+          kind: 'Function',
+          origin: 'Project',
+          desc: 'Constructs gateway routes using the available upstream handlers and chat limits.',
+          loc: 'cmd/gateway/run.go:45–48',
+          source:
+            'routes := gateway.NewHandler(\n    nonStreaming, streaming, readiness,\n    gateway.ChatLimits{\n        MaxBodyBytes: cfg.maxBodyBytes,\n        MaxTokens: cfg.maxTokens,\n    },\n)',
+        },
+        logging: {
+          name: 'requestlog.NewHandler',
+          kind: 'Function',
+          origin: 'Project',
+          desc: 'Wraps the gateway routes with request logging.',
+          loc: 'cmd/gateway/run.go:49',
+          source: 'loggedRoutes := requestlog.NewHandler(routes, slog.Default())',
+        },
+        server: {
+          name: 'http.Server',
+          kind: 'Composite literal',
+          origin: 'Source expression',
+          desc: 'Configures the address, handler, and request timeouts for the HTTP server.',
+          loc: 'cmd/gateway/run.go:52–58',
+          types: 'server *http.Server',
+          source:
+            'server := &http.Server{\n    Addr: cfg.addr,\n    Handler: loggedRoutes,\n    ReadTimeout: cfg.readTimeout,\n    ReadHeaderTimeout: cfg.readHeaderTimeout,\n    IdleTimeout: cfg.idleTimeout,\n}',
+        },
+        listen: {
+          name: 'net.Listen',
+          kind: 'Function',
+          origin: 'Standard library',
+          desc: 'Creates the TCP listener. If the call fails, this source return wraps the error with the server address.',
+          loc: 'cmd/gateway/run.go:60–63',
+          types: 'func Listen(network, address string) (net.Listener, error)',
+          source:
+            'listener, err := net.Listen("tcp", server.Addr)\nif err != nil {\n    return fmt.Errorf("listen gateway HTTP on %s: %w", server.Addr, err)\n}',
+          line: 'listener, err := net.Listen("tcp", server.Addr)',
+        },
+        runserver: {
+          name: 'runServer',
+          kind: 'Function',
+          origin: 'Project',
+          desc: 'Passes the context, server, listener, and shutdown timeout to runServer. An error returns from run with the wrapping message shown beside this call.',
+          loc: 'cmd/gateway/run.go:65–67',
+          types:
+            'func runServer(ctx context.Context, server *http.Server, listener net.Listener, shutdownTimeout time.Duration) error',
+          source:
+            'if err := runServer(ctx, server, listener, cfg.shutdownTimeout); err != nil {\n    return fmt.Errorf("run gateway HTTP on %s: %w", server.Addr, err)\n}',
+          line: 'if err := runServer(ctx, server, listener, cfg.shutdownTimeout); err != nil {',
+        },
+        done: {
+          name: 'return nil',
+          kind: 'Return statement',
+          origin: 'Source expression',
+          desc: 'Returns without an error after the preceding source checks.',
+          loc: 'cmd/gateway/run.go:69',
+          source: 'return nil',
+        },
+        configerror: {
+          name: 'load gateway config: %w',
+          kind: 'Error return',
+          origin: 'Source expression',
+          desc: 'This return site wraps the error from loadConfig. It ends this source branch.',
+          loc: 'cmd/gateway/run.go:20',
+          source: 'return fmt.Errorf("load gateway config: %w", err)',
+        },
+        listenerror: {
+          name: 'listen gateway HTTP on %s: %w',
+          kind: 'Error return',
+          origin: 'Source expression',
+          desc: 'This return site wraps the listener error and includes server.Addr.',
+          loc: 'cmd/gateway/run.go:62',
+          source: 'return fmt.Errorf("listen gateway HTTP on %s: %w", server.Addr, err)',
+        },
+        servererror: {
+          name: 'run gateway HTTP on %s: %w',
+          kind: 'Error return',
+          origin: 'Source expression',
+          desc: 'This return site wraps the runServer error and includes server.Addr.',
+          loc: 'cmd/gateway/run.go:66',
+          source: 'return fmt.Errorf("run gateway HTTP on %s: %w", server.Addr, err)',
+        },
+        cache: {
+          name: 'Cache lookup',
+          kind: 'Map lookup',
+          origin: 'Go Sonar description',
+          desc: 'Reads s.Cache[key] and binds record and ok. The label summarizes the source expression.',
+          loc: 'service.go:13',
+          types: 's.Cache map[string]store.Record\nkey string\nrecord store.Record\nok bool',
+          source: 'if record, ok := s.Cache[key]; ok {\n    return record, nil\n}',
+        },
+        hit: {
+          name: 'ok',
+          kind: 'Condition',
+          origin: 'Source expression',
+          desc: 'Tests the result of the cache lookup. The yes branch returns the cached record.',
+          loc: 'service.go:13',
+          source: 'if record, ok := s.Cache[key]; ok {',
+        },
+        cached: {
+          name: 'return record, nil',
+          kind: 'Return statement',
+          origin: 'Source expression',
+          desc: 'Returns the cached record. This branch skips the repository lookup and cache update.',
+          loc: 'service.go:14',
+          source: 'return record, nil',
+        },
+        lookup: {
+          name: 'Repository.Lookup',
+          kind: 'Interface method',
+          origin: 'Project',
+          desc: 'Calls the repository interface method using key. The concrete implementation is not established by this view.',
+          loc: 'service.go:16',
+          types: 'Lookup(string) (store.Record, error)',
+          source: 'record, err := s.Repository.Lookup(key)',
+          unknown: true,
+        },
+        lookuperror: {
+          name: 'err != nil',
+          kind: 'Condition',
+          origin: 'Source expression',
+          desc: 'Checks whether the repository lookup returned an error.',
+          loc: 'service.go:17',
+          source: 'if err != nil {',
+        },
+        failed: {
+          name: 'return store.Record{}, err',
+          kind: 'Error return',
+          origin: 'Source expression',
+          desc: 'Returns the lookup error without normalizing the record or updating the cache. This return does not add a wrapping message.',
+          loc: 'service.go:18',
+          source: 'return store.Record{}, err',
+        },
+        normalize: {
+          name: 'store.Normalize',
+          kind: 'Function',
+          origin: 'Project',
+          desc: 'Normalizes the record returned by a successful lookup. Enter this function while keeping the caller visible.',
+          loc: 'service.go:20',
+          types: 'func Normalize(record Record) Record\npackage store',
+          source: 'record = store.Normalize(record)',
+          navigate: 'follow',
+        },
+        writecache: {
+          name: 'Cache update',
+          kind: 'Map assignment',
+          origin: 'Go Sonar description',
+          desc: 'Stores the normalized record at s.Cache[key].',
+          loc: 'service.go:21',
+          types: 's.Cache map[string]store.Record',
+          source: 's.Cache[key] = record',
+        },
+        getdone: {
+          name: 'return record, nil',
+          kind: 'Return statement',
+          origin: 'Source expression',
+          desc: 'Returns the normalized record after the cache update.',
+          loc: 'service.go:23',
+          source: 'return record, nil',
+        },
+        normalizeentry: {
+          name: 'Normalize',
+          kind: 'Function entry',
+          origin: 'Project',
+          desc: 'Enters Normalize with the record passed by Service.Get.',
+          loc: 'store/store.go:31',
+          types: 'func Normalize(record Record) Record',
+          source: 'func Normalize(record Record) Record {',
+        },
+        prefix: {
+          name: 'Value assignment',
+          kind: 'Assignment',
+          origin: 'Go Sonar description',
+          desc: 'Prefixes the Value field of the local record with "value:".',
+          loc: 'store/store.go:32',
+          types: 'record Record\nrecord.Value string',
+          source: 'record.Value = "value:" + record.Value',
+        },
+        normalized: {
+          name: 'return record',
+          kind: 'Return statement',
+          origin: 'Source expression',
+          desc: 'Returns the changed local record to the caller. Get assigns the result to record and continues with its cache update.',
+          loc: 'store/store.go:33',
+          types: 'Record',
+          source: 'return record',
+        },
+      };
+      const resultTypes = {
+        load: '(config, error)',
+        clone: '*http.Transport',
+        cleanup: 'no results',
+        nonstream: 'http.Handler',
+        stream: 'http.Handler',
+        readiness: 'http.Handler',
+        routes: 'http.Handler',
+        logging: 'http.Handler',
+        listen: '(net.Listener, error)',
+        runserver: 'error',
+        lookup: '(store.Record, error)',
+        normalize: 'store.Record',
+      };
+      const groups = {
+        transport: {
+          name: 'Transport setup',
+          range: 'run.go:26–31',
+          children: ['clone', 'cleanup'],
+        },
+        handlers: {
+          name: 'Upstream handlers',
+          range: 'run.go:39–43',
+          children: ['nonstream', 'stream', 'readiness'],
+        },
+        serverconfig: { name: 'Server configuration', range: 'run.go:52–58', children: ['server'] },
+      };
+      const functionNodes = {
+        run: [
+          'load',
+          'clone',
+          'cleanup',
+          'upstream',
+          'nonstream',
+          'stream',
+          'readiness',
+          'routes',
+          'logging',
+          'server',
+          'listen',
+          'runserver',
+          'done',
+          'configerror',
+          'listenerror',
+          'servererror',
+        ],
+        get: [
+          'cache',
+          'hit',
+          'cached',
+          'lookup',
+          'lookuperror',
+          'failed',
+          'normalize',
+          'writecache',
+          'getdone',
+        ],
+        normalize: ['prefix', 'normalized'],
+      };
+      functionNodes.follow = [...functionNodes.get, 'normalizeentry', 'prefix', 'normalized'];
+      const initialGroups = (view) =>
+        functionNodes[view].length < 12 ? new Set(Object.keys(groups)) : new Set();
+      const state = {
+        view: 'run',
+        level: 1,
+        selected: 'runserver',
+        expanded: initialGroups('run'),
+        details: true,
+      };
+      const signatures = {
+        run: ['func run(ctx context.Context) error', 'main', 'llmgate'],
+        get: ['func (s *Service) Get(key string) (store.Record, error)', 'sample', 'sample'],
+        normalize: ['func Normalize(record Record) Record', 'store', 'sample'],
+        follow: ['func Normalize(record Record) Record', 'store', 'sample'],
+      };
+      const esc = (value) =>
+        String(value ?? '').replace(
+          /[&<>"']/g,
+          (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
+        );
+      let parts = [],
+        positions = {},
+        cursor = 20;
+      function edge(x1, y1, x2, y2, kind = 'normal', label = '') {
+        let d;
+        if (x1 === x2 || y1 === y2) d = `M${x1} ${y1} L${x2} ${y2}`;
+        else {
+          const mid = (x1 + x2) / 2;
+          const dx = Math.sign(x2 - x1),
+            dy = Math.sign(y2 - y1);
+          const r = Math.min(5, Math.abs(x2 - x1) / 3, Math.abs(y2 - y1) / 3);
+          d = `M${x1} ${y1} H${mid - dx * r} Q${mid} ${y1} ${mid} ${y1 + dy * r} V${y2 - dy * r} Q${mid} ${y2} ${mid + dx * r} ${y2} H${x2}`;
+        }
+        parts.push(
+          `<path class="edge ${kind === 'error' ? 'error' : ''}" d="${d}" marker-end="url(#${kind === 'error' ? 'errorArrow' : 'arrow'})"/>`,
+        );
+        if (label)
+          parts.push(
+            `<text class="branchlabel" x="${(x1 + x2) / 2 + 6}" y="${(y1 + y2) / 2 - 7}">${esc(label)}</text>`,
+          );
+      }
+      function node(id, x = 340, y = cursor, w = 250, type = 'normal') {
+        const n = data[id];
+        const h = type === 'error' ? 34 : state.level === 1 ? 36 : state.level === 2 ? 65 : 106;
+        positions[id] = { x, y, w, h };
+        let detail = '';
+        if (state.level >= 2 && type !== 'error')
+          detail += `<span class="detail">${esc(n.desc.length > 55 ? n.desc.slice(0, 52) + '…' : n.desc)}</span>`;
+        if (state.level === 3 && type !== 'error')
+          detail += `<span class="sourcehint">${esc(n.loc)}</span>${resultTypes[id] ? '<span class="sourcehint">→ ' + esc(resultTypes[id]) + '</span>' : ''}`;
+        const tag = n.origin === 'Standard library' ? '<span class="tag">stdlib</span>' : '';
+        const defer = n.defer ? '<span class="defermark">defer</span>' : '';
+        const unknown = n.unknown
+          ? '<span class="unknownmark" title="Concrete target unknown">?</span>'
+          : '';
+        const action = n.navigate ? '<span class="hoveraction" aria-hidden="true">↗</span>' : '';
+        if (type === 'decision')
+          parts.push(
+            `<polygon points="${x + w / 2 - 140},${y + h / 2} ${x + w / 2},${y - 5} ${x + w / 2 + 140},${y + h / 2} ${x + w / 2},${y + h + 5}" fill="none" stroke="#c1d0cc"/>`,
+          );
+        parts.push(
+          `<foreignObject x="${x}" y="${y}" width="${w}" height="${h}"><button xmlns="http://www.w3.org/1999/xhtml" class="node ${type} ${state.selected === id ? 'selected' : ''}" data-id="${id}" aria-pressed="${state.selected === id}" onclick="pick('${id}',event)" onkeydown="if(event.key==='ArrowRight' && data['${id}'].navigate){event.preventDefault();setView(data['${id}'].navigate)}" onmouseenter="showTip('${id}',this)" onmouseleave="hideTip()" onfocus="showTip('${id}',this)" onblur="hideTip()" aria-label="${esc(n.name + '; ' + n.kind + (n.navigate ? '; right arrow enters function' : ''))}"><span class="ntext"><span class="name">${esc(n.name)} ${tag} ${defer} ${unknown}</span>${detail}</span>${action}</button></foreignObject>`,
+        );
+        if (x === 340) cursor = y + h + 30;
+        return positions[id];
+      }
+      function connect(a, b, label = '') {
+        edge(a.x + a.w / 2, a.y + a.h, b.x + b.w / 2, b.y, 'normal', label);
+      }
+      function region(key) {
+        const g = groups[key];
+        const start = cursor;
+        if (!state.expanded.has(key)) {
+          const h = 36;
+          positions[key] = { x: 340, y: cursor, w: 250, h };
+          parts.push(
+            `<foreignObject x="340" y="${cursor}" width="250" height="${h}"><button xmlns="http://www.w3.org/1999/xhtml" class="node group" data-id="group-${key}" aria-label="Expand ${esc(g.name)}" onclick="toggleGroup('${key}')" aria-expanded="false"><span>${esc(g.name)} <span class="tag">· ${g.children.length}</span></span><span class="hoveraction">Expand</span></button></foreignObject>`,
+          );
+          cursor += h + 30;
+          return { first: positions[key], last: positions[key] };
+        }
+        cursor += 22;
+        let first, last;
+        for (const id of g.children) {
+          const p = node(id);
+          if (last) connect(last, p);
+          first ??= p;
+          last = p;
+        }
+        const bottom = last.y + last.h + 8;
+        parts.push(
+          `<path class="bracket" d="M327 ${start + 17} H319 V${bottom} H327"/><text class="grouplabel" x="339" y="${start + 9}">${esc(g.name)}${state.level === 3 ? ' · ' + esc(g.range) : ''}</text><foreignObject x="603" y="${start - 3}" width="70" height="28"><button xmlns="http://www.w3.org/1999/xhtml" class="groupControl" data-id="group-${key}" style="background:none;border:0;font-size:10px;color:#89999d" onclick="toggleGroup('${key}')" aria-label="Collapse ${esc(g.name)}">Collapse</button></foreignObject>`,
+        );
+        return { first, last };
+      }
+      function errorPill(call, id) {
+        const p = node(id, 18, call.y + 1, 270, 'error');
+        edge(call.x, call.y + call.h / 2, p.x + p.w, p.y + p.h / 2, 'error', 'error');
+      }
+      function drawRun() {
+        let p = node('load');
+        errorPill(p, 'configerror');
+        let r = region('transport');
+        connect(p, r.first);
+        p = r.last;
+        let cond = node('upstream', 340, cursor, 250, 'decision');
+        connect(p, cond);
+        r = region('handlers');
+        connect(cond, r.first, 'yes');
+        p = r.last;
+        const routes = node('routes');
+        connect(p, routes);
+        const x = 655,
+          sy = cond.y + cond.h / 2,
+          ey = routes.y - 14;
+        parts.push(
+          `<path class="edge" d="M605 ${sy} H${x - 8} Q${x} ${sy} ${x} ${sy + 8} V${ey - 8} Q${x} ${ey} ${x - 8} ${ey} H473 Q465 ${ey} 465 ${ey + 8} V${routes.y}" marker-end="url(#arrow)"/><text class="branchlabel" x="622" y="${sy - 7}">no</text>`,
+        );
+        p = node('logging');
+        connect(routes, p);
+        if (state.level === 3) {
+          r = region('serverconfig');
+          connect(p, r.first);
+          p = r.last;
+        }
+        const listen = node('listen');
+        connect(p, listen);
+        errorPill(listen, 'listenerror');
+        const run = node('runserver');
+        connect(listen, run);
+        errorPill(run, 'servererror');
+        const done = node('done', 340, cursor, 250, 'return');
+        connect(run, done);
+      }
+      function drawGet() {
+        let p = node('cache');
+        let cond = node('hit', 340, cursor, 250, 'decision');
+        connect(p, cond);
+        let ret = node('cached', 18, cond.y, 270, 'return');
+        edge(cond.x - 15, cond.y + cond.h / 2, ret.x + ret.w, ret.y + ret.h / 2, 'normal', 'yes');
+        p = node('lookup');
+        connect(cond, p, 'no');
+        cond = node('lookuperror', 340, cursor, 250, 'decision');
+        connect(p, cond);
+        ret = node('failed', 18, cond.y, 270, 'error');
+        edge(cond.x - 15, cond.y + cond.h / 2, ret.x + ret.w, ret.y + ret.h / 2, 'error', 'yes');
+        p = node('normalize');
+        connect(cond, p, 'no');
+        let next = node('writecache');
+        connect(p, next);
+        p = node('getdone', 340, cursor, 250, 'return');
+        connect(next, p);
+      }
+      function drawNormalize() {
+        let p = node('prefix');
+        let next = node('normalized', 340, cursor, 250, 'return');
+        connect(p, next);
+        parts.push(
+          `<text class="grouplabel" x="340" y="${cursor + 12}">After returning: Service.Get → Cache update</text>`,
+        );
+        cursor += 45;
+      }
+      function drawFollow() {
+        parts.push(
+          '<text class="grouplabel" x="340" y="15">Caller · package sample</text><text x="340" y="37" fill="#526870" font-size="11" font-family="ui-monospace,monospace">func (s *Service) Get(key string) (store.Record, error)</text><text class="grouplabel" x="795" y="15">Reading · package store</text>',
+        );
+        cursor = 67;
+        drawGet();
+        const parentBottom = cursor;
+        const call = positions.normalize;
+        const entry = node('normalizeentry', 795, 140, 270);
+        const work = node('prefix', 795, 245, 270);
+        const returned = node('normalized', 795, 350, 270, 'return');
+        connect(entry, work);
+        connect(work, returned);
+        const sy = call.y + call.h / 2,
+          ey = entry.y + entry.h / 2;
+        parts.push(
+          `<path d="M590 ${sy} H676 Q684 ${sy} 684 ${sy - 8} V${ey + 8} Q684 ${ey} 692 ${ey} H795" fill="none" stroke="#659da0" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arrow)"/><text class="branchlabel" x="697" y="${ey - 10}">calls</text><text class="grouplabel" x="795" y="${returned.y + returned.h + 36}">Returns to the selected call site</text><text class="grouplabel" x="795" y="${returned.y + returned.h + 55}">Then: Cache update</text>`,
+        );
+        cursor = Math.max(parentBottom, returned.y + returned.h + 80);
+      }
+      function render() {
+        const focusedId = document.activeElement?.dataset?.id;
+        const focusedGroup = document.activeElement?.getAttribute('aria-label');
+        hideTip();
+        parts = [
+          `<defs><marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L8 4 L0 8" fill="none" stroke="#a6b8bb" stroke-width="1.4"/></marker><marker id="errorArrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L8 4 L0 8" fill="none" stroke="#c77b75" stroke-width="1.4"/></marker></defs>`,
+        ];
+        positions = {};
+        cursor = 20;
+        if (state.view === 'run') drawRun();
+        else if (state.view === 'get') drawGet();
+        else if (state.view === 'follow') drawFollow();
+        else drawNormalize();
+        const svg = document.getElementById('diagram');
+        svg.setAttribute('viewBox', `0 0 ${state.view === 'follow' ? 1100 : 760} ${cursor + 10}`);
+        svg.style.minWidth = state.view === 'follow' ? '1100px' : '640px';
+        svg.style.height = cursor + 10 + 'px';
+        svg.innerHTML = parts.join('');
+        const [sig, pkg, project] = signatures[state.view];
+        document.getElementById('signature').textContent = sig;
+        document.getElementById('package').textContent = 'package ' + pkg;
+        document.getElementById('project').textContent = project;
+        for (let i = 1; i <= 3; i++)
+          document.getElementById('level-' + i).setAttribute('aria-pressed', state.level === i);
+        for (const id of ['run', 'get'])
+          document.getElementById('example-' + id).setAttribute('aria-pressed', state.view === id);
+        document
+          .getElementById('back')
+          .classList.toggle('hidden', !['normalize', 'follow'].includes(state.view));
+        document.getElementById('groupToggle').classList.toggle('hidden', state.view !== 'run');
+        document.getElementById('groupToggle').textContent = state.expanded.has('handlers')
+          ? 'Collapse groups'
+          : 'Expand groups';
+        document.getElementById('hint').textContent =
+          state.level === 1
+            ? 'Calls and control flow. Descriptions on hover.'
+            : state.level === 2
+              ? 'Descriptions added. Source ranges stay in details.'
+              : 'Source ranges and declaration types added.';
+        showDetails();
+        if (focusedId) document.querySelector(`[data-id="${focusedId}"]`)?.focus();
+        else if (focusedGroup)
+          [...svg.querySelectorAll('button')]
+            .find((button) => button.getAttribute('aria-label') === focusedGroup)
+            ?.focus();
+      }
+      function showDetails() {
+        const n = data[state.selected];
+        if (!n) return;
+        document.getElementById('selectedName').textContent = n.name;
+        document.getElementById('selectedKind').textContent = n.kind + ' · ' + n.origin;
+        document.getElementById('selectedDescription').textContent = n.desc;
+        document.getElementById('selectedLocation').textContent = n.loc;
+        document.getElementById('selectedSource').innerHTML = n.source
+          .split('\n')
+          .map((line) =>
+            line === (n.line || n.source.split('\n')[0])
+              ? `<span class="selectedline">${esc(line)}</span>`
+              : esc(line),
+          )
+          .join('\n');
+        document.getElementById('selectedTypes').textContent = n.types || n.kind;
+        document.getElementById('selectedUnknown').classList.toggle('hidden', !n.unknown);
+        document.getElementById('selectedContext').textContent = n.defer
+          ? 'Deferred call: ' + n.defer
+          : n.navigate
+            ? 'Enter Normalize using the arrow on this node.'
+            : 'Source facts and Go Sonar descriptions are shown separately.';
+        document.getElementById('inspector').classList.toggle('hidden', !state.details);
+        document.getElementById('workspace').classList.toggle('detailsclosed', !state.details);
+      }
+      function pick(id, event) {
+        if (event && event.target.closest('.hoveraction') && data[id].navigate) {
+          setView(data[id].navigate);
+          return;
+        }
+        state.selected = id;
+        state.details = true;
+        render();
+      }
+      function setLevel(level) {
+        state.level = level;
+        render();
+      }
+      const viewScroll = new Map();
+      function setView(view) {
+        viewScroll.set(state.view, document.getElementById('scroll').scrollTop);
+        state.view = view;
+        state.selected = view === 'run' ? 'runserver' : view === 'get' ? 'normalize' : 'prefix';
+        state.expanded = initialGroups(view);
+        render();
+        document.getElementById('scroll').scrollTop = viewScroll.get(view) || 0;
+      }
+      function toggleGroup(key) {
+        state.expanded.has(key) ? state.expanded.delete(key) : state.expanded.add(key);
+        render();
+      }
+      function toggleGroups() {
+        if (state.expanded.has('handlers')) state.expanded.clear();
+        else Object.keys(groups).forEach((k) => state.expanded.add(k));
+        render();
+      }
+      function toggleDetails() {
+        state.details = !state.details;
+        showDetails();
+      }
+      function showTip(id, anchor) {
+        const n = data[id],
+          tip = document.getElementById('tip');
+        tip.innerHTML = `<strong>${esc(n.name)}</strong>${esc(n.desc)}${n.types ? '<br><code>' + esc(n.types) + '</code>' : ''}${n.defer ? '<br><code>defer ' + esc(n.defer) + '</code>' : ''}${n.unknown ? '<br><span style="color:#9f771a">Concrete target unknown</span>' : ''}<div class="tipmeta">${esc(n.kind)} · ${esc(n.origin)}<br>${esc(n.loc)}</div>`;
+        tip.style.display = 'block';
+        const r = anchor.getBoundingClientRect();
+        tip.style.left = Math.max(12, Math.min(r.right + 10, window.innerWidth - 280)) + 'px';
+        tip.style.top =
+          Math.max(12, Math.min(r.top, window.innerHeight - tip.offsetHeight - 12)) + 'px';
+      }
+      function hideTip() {
+        document.getElementById('tip').style.display = 'none';
+      }
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          hideTip();
+          if (['normalize', 'follow'].includes(state.view)) setView('get');
+        }
+      });
+      render();
+      // Check the preview's control states and source associations without changing the initial view.
+      setLevel(2);
+      if (!document.querySelector('.detail')) throw Error('Description level did not render');
+      setLevel(3);
+      toggleGroups();
+      if (!document.querySelector('.bracket') || !document.querySelector('.defermark'))
+        throw Error('Expanded groups or defer marker missing');
+      if (!document.querySelector('[data-id="listen"] .tag'))
+        throw Error('Standard-library origin missing');
+      pick('cleanup');
+      if (!document.getElementById('selectedContext').textContent.includes('CloseIdleConnections'))
+        throw Error('Deferred call missing from details');
+      setView('get');
+      if (!document.getElementById('signature').textContent.includes('(s *Service)'))
+        throw Error('Receiver missing');
+      if (!document.querySelector('.unknownmark')) throw Error('Interface uncertainty missing');
+      setView('normalize');
+      if (document.getElementById('signature').textContent.includes('Receiver'))
+        throw Error('Redundant receiver metadata');
+      setView('follow');
+      if (
+        !document.querySelector('[data-id="normalize"]') ||
+        !document.querySelector('[data-id="prefix"]')
+      )
+        throw Error('Caller or callee is missing');
+      if (initialGroups('run').size !== 0 || initialGroups('get').size !== 3)
+        throw Error('Initial group threshold is incorrect');
+      setView('run');
+      setLevel(1);
+      console.log(
+        'Preview checks passed: detail levels, group threshold, expansion, defer details, stdlib origin, receiver signature, and interface uncertainty.',
+      );
+    </script>
+  </body>
+</html>

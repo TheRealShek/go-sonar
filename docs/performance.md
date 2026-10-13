@@ -24,7 +24,7 @@ Record the nodes, edges, source-detail bytes, and total payload bytes sent for e
 
 Test the same bounded exploration against indexes of increasing size. Renderer data should track the displayed scope rather than grow simply because the underlying repository contains more symbols.
 
-Test expanding and collapsing function internals, shared dependencies, cycles, filters, viewport changes, and repeated navigation. A collapsed or off-screen connection must retain a meaningful representation when needed, without restoring its hidden subtree.
+Test all three [approved screens](ui-design.md), all detail levels, region brackets and collapsed counts, hover/selection, and exact caller restoration. Detail levels must not hydrate an unbounded graph or increase analysis coverage. Test expanding and collapsing function internals, shared dependencies, cycles, filters, viewport changes, and repeated navigation. A collapsed or off-screen connection must retain a meaningful representation when needed, without restoring its hidden subtree.
 
 Separate current display data from bounded layout metadata and saved exploration history. Each has an explicit size policy; none is a place to keep another unbounded copy of the index.
 

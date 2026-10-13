@@ -164,3 +164,13 @@ The T3 preview snapshot timed out twice, so browser acceptance used local Chromi
 The plain `cargo build --release --workspace` binary above still used Tauri's development-server URL. Launching it without that server produced a connection-refused page. Rebuilding with the documented `npm run desktop:build -- --no-bundle` command enabled the standalone asset protocol and replaced `target/release/go-sonar` with the correct desktop build.
 
 One native background cycle against LLM Gate then completed through Tauri IPC, WebKit, the layout worker, and the real analyzer/backend without a timeout. This verifies embedded frontend loading and DOM commits, not displayed frames. LLM Gate's 22 file hashes and Git status remained unchanged. The raw local report is `/tmp/sonar-rounded-native-check.json`.
+
+## Minimal UI design checkpoint
+
+The three-screen specification in [Minimal function exploration](ui-design.md) is approved. Function flow, caller/callee, and long-function screenshots and the standalone prototype are saved under `docs/prototypes/minimal-ui/`.
+
+Prototype checks covered detail levels, expansion, defer hover details, signatures, standard-library origin tags, interface uncertainty, caller visibility, and rendered previews. They used inspected source from the sample fixture and llmgate. Group counts and layouts are illustrative. These checks did not execute the analyzer or native desktop and do not validate an implementation.
+
+Earlier UI and benchmark records remain historical results. They do not establish that the approved redesign is implemented or verified. Record new real-project and native checks here after implementation.
+
+The documentation checkpoint also passed a separate read-only backend baseline against llmgate using the freshly built Go analyzer and Rust `sonar-bench`: 130 symbols, 855 relationships, unchanged refresh, and neighborhood, expansion, and internals queries. The latter two reported their bounded-view truncation. All 28 file hashes and Git status matched the pre-check baseline. This checks existing analysis behavior, not the proposed UI or native rendering.
