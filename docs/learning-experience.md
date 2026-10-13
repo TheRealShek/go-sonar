@@ -2,43 +2,15 @@
 
 The goal is to help a developer explain real code accurately while keeping their place in the graph. This is code comprehension within the offline static-analysis product, not a programming tutorial.
 
-Earlier recommendations came from a screenshot and source inspection, not an interactive usability study. Several recommended controls now exist in the working source. Their presence does not establish that the usability goals below have passed. See the [user guide](user-guide.md) for instructions.
+The [approved UI specification](ui-design.md) defines the three main screens and supersedes earlier presentation proposals. The primary task is understanding a function's flow and its connections, then entering a callee without losing the caller.
 
-## Current controls and intended outcomes
+## Approved presentation
 
-### Keep labels readable
+The function header shows its Go signature and package. Default nodes show one name, with a small origin tag only for non-project calls. Explanations and exact source expressions appear in hover and selection. Language kinds and signatures stay distinct from Go Sonar descriptions and grouped source.
 
-Center the initial view on the focus, preserve the viewport during expansion, and let the user request an overview explicitly. A large fan-out should not force every label to become unreadable.
+The three detail levels add descriptions, then source ranges and type facts. Expanded regions use brackets; collapsed regions retain analyzed counts. Rounded orthogonal routes, labeled branch edges, defer registration markers, and distinct return-site pills preserve source meaning while reducing repeated labels and controls.
 
-The current frontend has focus centering, explicit fitting, viewport-preserving expansion, and history restoration. Validate their behavior on a real module with a tall dependency graph before treating readability as solved.
-
-### Identify declarations and source sites
-
-Identity cards expose signatures, packages, and locations outside the zoomed canvas. Pinning keeps details available. Edge inspection presents the caller's expression and source site, and grouped connections retain individual occurrences.
-
-A callee signature identifies the target; the caller expression explains what creates the connection. Type-resolved signatures may differ from declaration spelling. For external declarations, use local call-site evidence when source is outside the project.
-
-### Start with a question
-
-Question controls offer outgoing calls, incoming callers, and internal behavior. Initial function views use a small calls neighborhood; fields and types use different relationship defaults. Package and declaration browsing supports libraries without an entry function.
-
-Group summaries and hidden counts need to explain filters, collapse, pagination, and limits. Test that users can discover less prominent relationships rather than interpreting the first view as complete.
-
-### Follow bounded behavior
-
-Function behavior uses region summaries, reveal actions, marked boundaries, and static path navigation. Branch choices remain visible. Return selection highlights possible control routes, while call navigation retains the originating occurrence and supports returning to the caller.
-
-These controls must not imply feasible inputs, observed execution, or complete unrolling of loops and recursion. Unsupported continuation must remain visible at the operation where analysis stops.
-
-### Explain values and state changes
-
-Structured operation facts provide explanations, argument/parameter mappings, returned-position destinations, field accesses, and local binding occurrences. Mutation inspection connects an operation to known readers and writers.
-
-Mappings must remain distinguishable from proven value dependence. Passing an argument does not establish its effect on a result. Local occurrences do not establish reaching definitions across all paths. Updating a map entry differs from replacing the map field.
-
-### Support inspection without a pointer
-
-The current inspector includes keyboard-selectable nodes and connections, and Escape dismisses details and selection. Test that users can reach the same evidence and actions using the keyboard. A source audit does not establish complete accessibility.
+The three prototype screens passed render and interaction checks. They are not a learner study or native-app verification. Implementation must preserve bounded navigation, source freshness checks, keyboard access, and explicit unknown targets. The tasks below define the comprehension checks for that implementation.
 
 ## Proposed comprehension checks
 

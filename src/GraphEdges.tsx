@@ -3,27 +3,27 @@ import type { EdgeRoute, Point } from './layout/contract';
 import type { GraphView, ViewEdge } from './shared/protocol';
 
 export const relationshipColors: Record<string, string> = {
-  control: '#88c0d0',
-  data: '#b48ead',
-  calls: '#81a1c1',
-  references: '#81a1c1',
-  reads: '#b48ead',
-  writes: '#b48ead',
-  constructs: '#81a1c1',
-  implements: '#81a1c1',
-  uses_type: '#81a1c1',
+  control: '#54878c',
+  data: '#827296',
+  calls: '#63859c',
+  references: '#63859c',
+  reads: '#827296',
+  writes: '#827296',
+  constructs: '#63859c',
+  implements: '#63859c',
+  uses_type: '#63859c',
 };
 
-const connectionColors = ['#81a1c1', '#88c0d0', '#a3be8c', '#b48ead', '#ebcb8b', '#d5967a'];
+const connectionColors = ['#63859c', '#54878c', '#397e71', '#827296', '#a47826', '#a47854'];
 
 export function connectionColor(id: string, kind: string, label: string) {
-  if (['data', 'reads', 'writes'].includes(kind)) return '#b48ead';
+  if (['data', 'reads', 'writes'].includes(kind)) return '#827296';
   if (kind === 'control') {
-    if (['false', 'done'].includes(label)) return '#d5967a';
-    if (['true', 'iterate', 'next item'].includes(label)) return '#a3be8c';
-    return '#88c0d0';
+    if (['false', 'done'].includes(label)) return '#a47854';
+    if (['true', 'iterate', 'next item'].includes(label)) return '#397e71';
+    return '#54878c';
   }
-  if (kind !== 'calls') return relationshipColors[kind] ?? '#81a1c1';
+  if (kind !== 'calls') return relationshipColors[kind] ?? '#63859c';
   let hash = 0;
   for (const char of id) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
   return connectionColors[hash % connectionColors.length];
@@ -35,7 +35,9 @@ export function relationshipName(kind: string): string {
 
 export function edgeLabel(edge: ViewEdge): string {
   const label =
-    edge.kind === 'control' ? edge.label || 'source order' : relationshipName(edge.kind);
+    edge.kind === 'control'
+      ? ({ true: 'yes', false: 'no' }[edge.label] ?? edge.label) || 'source order'
+      : relationshipName(edge.kind);
   return `${edge.certainty === 'possible' ? '? possible · ' : ''}${label}${edge.loopBack ? ' · ↺ loop back' : ''}${(edge.siteCount ?? 0) > 1 ? ` · ${edge.siteCount} source sites` : ''}`;
 }
 
@@ -80,7 +82,7 @@ export function GraphLegend({ view }: { view: GraphView }) {
         <span key={kind}>
           <i
             className="legend-line"
-            style={{ borderColor: relationshipColors[kind] ?? '#81a1c1' }}
+            style={{ borderColor: relationshipColors[kind] ?? '#63859c' }}
           />
           {relationshipName(kind)}
           {!behavior && kind === 'calls' ? ' · colors trace individual connections' : ''}
@@ -95,7 +97,7 @@ export function GraphLegend({ view }: { view: GraphView }) {
       {view.edges.some((edge) => edge.loopBack) && <span>↺ solid return route · loop back</span>}
       {behavior && (
         <span>
-          <i className="legend-line" style={{ borderColor: '#ebcb8b' }} />
+          <i className="legend-line" style={{ borderColor: '#a47826' }} />
           Next step
         </span>
       )}

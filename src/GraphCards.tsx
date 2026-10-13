@@ -1,6 +1,7 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 import type { ViewNode, ViewEdge } from './shared/protocol';
-import { symbolName, compactPackage } from './identity';
+import { symbolName } from './identity';
+import type { DetailLevel } from './nodePresentation';
 
 export type SymbolNode = Node<{
   label: string;
@@ -9,10 +10,19 @@ export type SymbolNode = Node<{
   grouped: boolean;
   focused: boolean;
   role?: string;
-  join?: boolean;
   limitation?: string;
-  newlyRevealed?: boolean;
   packageId: string;
+  level: DetailLevel;
+  tag?: string;
+  sourceRange: string;
+  type: string;
+  error: boolean;
+  errorDecision?: boolean;
+  deferred: boolean;
+  unresolved: boolean;
+  onEnter?: () => void;
+  onExpand?: () => void;
+  brackets?: { id: string; name: string; range: string; x: number; y: number; height: number }[];
 }>;
 
 export function SymbolCard({ data }: NodeProps<SymbolNode>) {
@@ -22,21 +32,66 @@ export function SymbolCard({ data }: NodeProps<SymbolNode>) {
     <>
       <Handle type="target" position={behavior ? Position.Top : Position.Left} />
       <div
-        className={`symbol-card ${data.grouped ? 'grouped' : ''} ${data.focused ? 'focused' : ''} role-${data.role ?? 'symbol'}`}
+        className={`symbol-card ${data.grouped ? 'grouped' : ''} ${data.focused ? 'focused' : ''} ${data.error ? 'error-return' : ''} ${decision ? 'decision' : ''} role-${data.role ?? 'symbol'}`}
       >
-        <small>
-          {data.role ?? data.kind}
-          {data.grouped ? ' · static behavior' : ''}
-          {data.join ? ' · join' : ''}
-          {data.newlyRevealed && <span className="new-node-label">New</span>}
-        </small>
-        <strong className={behavior ? 'behavior-expression' : undefined} title={data.label}>
-          {data.label}
-        </strong>
-        <span className="node-package" title={data.packageId}>
-          {compactPackage(data.packageId)}
-        </span>
-        <span>{data.limitation ? 'Analysis boundary · inspect details' : data.summary}</span>
+        <div className="node-name">
+          <strong title={data.label}>{data.label}</strong>
+          {data.tag && <span className="origin-tag">{data.tag}</span>}
+          {data.deferred && (
+            <span className="defer-marker" title="Registers deferred cleanup">
+              defer
+            </span>
+          )}
+          {data.unresolved && (
+            <span className="uncertainty" title="Concrete implementation unknown">
+              ?
+            </span>
+          )}
+          {data.onEnter && (
+            <button
+              className="node-action nodrag"
+              aria-label={`Enter ${data.label}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                data.onEnter?.();
+              }}
+            >
+              ↗
+            </button>
+          )}
+          {data.onExpand && (
+            <button
+              className="node-action nodrag"
+              onClick={(event) => {
+                event.stopPropagation();
+                data.onExpand?.();
+              }}
+            >
+              Expand
+            </button>
+          )}
+        </div>
+        {!data.grouped && !data.error && data.level >= 2 && (
+          <span className="node-description">{data.summary}</span>
+        )}
+        {!data.grouped && !data.error && data.level === 3 && (
+          <span className="node-types" title={data.type}>
+            {data.sourceRange} {data.type}
+          </span>
+        )}
+        {data.grouped && data.level === 3 && <span>{data.sourceRange}</span>}
+        {data.brackets?.map((group) => (
+          <div
+            key={group.id}
+            className="source-bracket"
+            style={{ left: group.x, top: group.y, height: group.height }}
+          >
+            <span>
+              {group.name}
+              {data.level === 3 ? ` · ${group.range}` : ''}
+            </span>
+          </div>
+        ))}
       </div>
       <Handle type="source" position={behavior ? Position.Bottom : Position.Right} />
       {decision && (
@@ -44,10 +99,14 @@ export function SymbolCard({ data }: NodeProps<SymbolNode>) {
           <Handle
             type="source"
             id="branch-true"
-            position={Position.Bottom}
-            style={{ left: '28%' }}
+            position={data.errorDecision ? Position.Right : Position.Bottom}
+            style={data.errorDecision ? undefined : { left: '50%' }}
           />
-          <Handle type="source" id="branch-false" position={Position.Right} />
+          <Handle
+            type="source"
+            id="branch-false"
+            position={data.errorDecision ? Position.Bottom : Position.Right}
+          />
         </>
       )}
       {behavior && <Handle type="source" id="dependency" position={Position.Right} />}
@@ -106,6 +165,24 @@ export function IdentityCard({
           (value as ViewEdge).label}
       </code>
       <p>{node?.packageId ?? caller?.packageId}</p>
+      {node && (
+        <p>
+          {node.details?.callName
+            ? node.details.callKind || 'Callable kind unavailable'
+            : node.kind}{' '}
+          ·{' '}
+          {(node.kind === 'call' || node.details?.callName || node.details?.role === 'defer'
+            ? node.details?.callOrigin || callee?.origin
+            : node.origin) || 'Origin unknown'}
+        </p>
+      )}
+      {node?.details?.explanation && <p>{node.details.explanation}</p>}
+      {node?.details?.role === 'defer' && (
+        <p>
+          Deferred call: <code>{node.details.expression}</code>
+        </p>
+      )}
+      {node?.details?.limitation && <p className="notice">{node.details.limitation}</p>}
       {node?.parentId && <p>Within {parent ? symbolName(parent) : node.qualifiedName}</p>}
       {callee && (
         <>

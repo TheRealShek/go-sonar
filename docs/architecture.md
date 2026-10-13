@@ -10,7 +10,7 @@ This document explains component responsibilities and required boundaries. [Impl
 
 Tauri hosts the native app and connects React to Rust through desktop commands. React, TypeScript, and Vite provide the frontend; React Flow displays symbols, connections, and nested function groups.
 
-The frontend owns interaction, selection, exploration history, flow navigation, and viewport state. It requests bounded views rather than receiving the complete source index. Browser preview uses labelled illustrative data; the desktop uses the real analyzer.
+The frontend owns interaction, selection, exploration history, flow navigation, detail level, and viewport state. The [approved UI design](ui-design.md) uses signature headers, concise nodes, bracketed source regions, and hover/selection explanations. Visual groups remain distinct from Go declarations; presentation preferences do not change source identities or query bounds. It requests bounded views rather than receiving the complete source index. Browser preview uses labelled illustrative data; the desktop uses the real analyzer.
 
 ### Rust core
 

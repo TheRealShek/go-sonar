@@ -164,3 +164,40 @@ The T3 preview snapshot timed out twice, so browser acceptance used local Chromi
 The plain `cargo build --release --workspace` binary above still used Tauri's development-server URL. Launching it without that server produced a connection-refused page. Rebuilding with the documented `npm run desktop:build -- --no-bundle` command enabled the standalone asset protocol and replaced `target/release/go-sonar` with the correct desktop build.
 
 One native background cycle against LLM Gate then completed through Tauri IPC, WebKit, the layout worker, and the real analyzer/backend without a timeout. This verifies embedded frontend loading and DOM commits, not displayed frames. LLM Gate's 22 file hashes and Git status remained unchanged. The raw local report is `/tmp/sonar-rounded-native-check.json`.
+
+## Minimal UI design checkpoint
+
+The three-screen specification in [Minimal function exploration](ui-design.md) is approved. Function flow, caller/callee, and long-function screenshots and the standalone prototype are saved under `docs/prototypes/minimal-ui/`.
+
+Prototype checks covered detail levels, expansion, defer hover details, signatures, standard-library origin tags, interface uncertainty, caller visibility, and rendered previews. They used inspected source from the sample fixture and llmgate. Group counts and layouts are illustrative. These checks did not execute the analyzer or native desktop and do not validate an implementation.
+
+Earlier UI and benchmark records remain historical results. They do not establish that the approved redesign is implemented or verified. Record new real-project and native checks here after implementation.
+
+The documentation checkpoint also passed a separate read-only backend baseline against llmgate using the freshly built Go analyzer and Rust `sonar-bench`: 130 symbols, 855 relationships, unchanged refresh, and neighborhood, expansion, and internals queries. The latter two reported their bounded-view truncation. All 28 file hashes and Git status matched the pre-check baseline. This checks existing analysis behavior, not the proposed UI or native rendering.
+
+## Minimal UI implementation, 2026-10-13
+
+The implementation adds compact names, signatures and packages, three detail levels, reliable origin and callable-kind metadata, defer registration markers, typed error-return pills, source-group brackets, rounded Flow routes, and an immediate saved-caller pane. More and Follow a path retain the less frequent controls. The minimap, New badges, repeated node package rows, call ribbons, permanent graph legend, and duplicate context rows were removed.
+
+The three images below are Chromium captures of the compiled frontend using the real Go analyzer and Rust backend through a temporary local transport bridge against read-only llmgate. They are implementation evidence, distinct from the approved prototypes.
+
+| Function flow                                              | Enter a callee                                                | Long function                                                               |
+| ---------------------------------------------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| [backendHandler](screenshots/minimal-ui/function-flow.png) | [run to loadConfig](screenshots/minimal-ui/caller-callee.png) | [run with disclosed source group](screenshots/minimal-ui/long-function.png) |
+
+Passed:
+
+- 90 frontend tests, TypeScript and production build, frontend formatting, and whitespace checks. A new routing regression covers the error guard's side arm and continuing arm.
+- Go race tests and vet; gofmt on changed files. Full WSL reports existing package findings; changed lines have no remaining findings.
+- All 28 Rust core integration tests, workspace Clippy with warnings denied, and Rust formatting.
+- Standalone native Linux build without installer packaging.
+- Real llmgate browser acceptance: a seven-node short function starts expanded; keyboard Enter opens the callee and expands a region; the saved caller supports inspection and all detail levels; saved-context navigation is disabled; Return restores the exact saved viewport; disclosed brackets show ranges; the no edge from `cfg.upstreamURL != nil` targets `gateway.NewHandler`; the three typed error-return sites and standard-library defer registration remain source-backed. No page errors occurred.
+- Final background native check through Tauri IPC, WebKit, the worker, and the real analyzer/backend. It completed at one iteration with peak process-tree PSS of 499437 KiB. This mode verifies native DOM commits and explicitly excludes displayed frames. The local report is `/tmp/sonar-minimal-native-final.json`.
+- Matching hashes for all 28 llmgate files and unchanged Git status after all checks.
+- Separate standards and specification reviews, followed by fixes and affected-code rechecks. Keyboard activation, caller hover transfer, occurrence context, origin consistency, density anchoring, and disclosure counts were corrected.
+
+T3 browser snapshots timed out twice with `Preview automation snapshot timed out after 15000ms`; browser acceptance used local Chromium. Kache was unavailable, so Rust checks did not rely on that cache. Native foreground presentation, numerical performance budgets, and learner usability remain unestablished. Preserved landmarks and dragging can still invalidate calculated routes and require rounded fallbacks, which do not guarantee obstacle avoidance.
+
+### Pull request comparison
+
+The [before screenshot](screenshots/minimal-ui/function-flow-before.png) uses the exact main-branch frontend, Go analyzer, and Rust backend in an isolated checkout. It matches the implemented [after screenshot](screenshots/minimal-ui/function-flow.png): llmgate `backendHandler`, Flow view, a closed inspector, and a 1440 × 900 viewport. The old default Flow framing places most of the function below the viewport; the redesigned framing starts at its entry. All 28 llmgate hashes and Git status remained unchanged during the comparison capture.

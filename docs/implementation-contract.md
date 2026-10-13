@@ -71,6 +71,14 @@ Impact categories are signature, field, and behavior. Results frame incoming sou
 
 The desktop uses real analysis. Browser preview may use labelled illustrative data and must not silently replace failed native analysis with a sample.
 
-The frontend preserves interaction state separately from source facts. Superseded requests cannot overwrite a newer view. Flow navigation is bounded to 120 steps and 16 call frames.
+The frontend preserves interaction state separately from source facts. The [approved presentation](ui-design.md) adds detail levels and compact region rendering without changing relationship semantics. Each error-return pill retains its original return-site ID and evidence. Defer markers identify registration, not immediate execution. Source origins must come from reliable analysis metadata; unresolved origin and dispatch remain explicit. Superseded requests cannot overwrite a newer view. Flow navigation is bounded to 120 steps and 16 call frames.
 
 ELK runs in a locally bundled worker behind an independent layout contract. Input contains bounded topology, dimensions, groups, and placement metadata; output is geometry. Analyzer facts, persisted records, and Tauri query contracts contain no ELK or React Flow objects.
+
+## Compact presentation evidence
+
+The analyzer supplies declaration `origin` and operation `callName`, `callKind`, and `callOrigin` separately. Loaded module and dependency metadata determine origin; package spelling does not. Missing origin remains unknown. Callable kind distinguishes functions, methods, builtins, and conversions independently of origin. Older cached or sample facts may omit these fields.
+
+`errorReturn` contains a typed error result's source expression, or an actual literal message from `fmt.Errorf` or `errors.New`. It does not establish runtime failure or substitute for the full return expression. Deferred registration retains its callable facts without adding an immediately executed call edge.
+
+A disclosed region carries `sourceGroup` identity, name, and line range on its members. The presentation draws a bracket without turning that region into a callable declaration. Counts and the 12-node disclosure preference do not raise graph query limits.

@@ -5,6 +5,8 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"strconv"
+	"strings"
 )
 
 // operation derives explanations from typed syntax, keeping unsupported flow explicit.
@@ -46,7 +48,8 @@ func (x *extractor) operation(kind string, n ast.Node) OperationFacts {
 		d.Explanation = "This loop offers its body and any source-defined exit. Loop repetitions stay bounded."
 	case "call":
 		if call, ok := n.(*ast.CallExpr); ok {
-			d.Call = x.callBoundary(call)
+			x.describeCall(&d, call)
+
 			d.Explanation = "This invokes " + x.label(call.Fun) + " with the shown argument expressions."
 			if _, ok := x.callee(call.Fun).(*types.TypeName); ok {
 				d.Role = "conversion"
@@ -59,14 +62,45 @@ func (x *extractor) operation(kind string, n ast.Node) OperationFacts {
 			}
 		}
 	case "return":
+		if statement, ok := n.(*ast.ReturnStmt); ok {
+			for _, result := range statement.Results {
+				if ident, ok := result.(*ast.Ident); ok && ident.Name == "nil" {
+					continue
+				}
+
+				resultType := x.pkg.TypesInfo.TypeOf(result)
+				if resultType == nil || !types.AssignableTo(resultType, types.Universe.Lookup("error").Type()) {
+					continue
+				}
+
+				d.ErrorReturn = x.label(result)
+				if call, ok := result.(*ast.CallExpr); ok && len(call.Args) > 0 {
+					callee := x.callee(call.Fun)
+					if callee != nil && callee.Pkg() != nil &&
+						((callee.Pkg().Path() == "fmt" && callee.Name() == "Errorf") ||
+							(callee.Pkg().Path() == "errors" && callee.Name() == "New")) {
+						if literal, ok := call.Args[0].(*ast.BasicLit); ok && literal.Kind == token.STRING {
+							if message, err := strconv.Unquote(literal.Value); err == nil && message != "" {
+								d.ErrorReturn = message
+							}
+						}
+					}
+				}
+
+				break
+			}
+		}
+
 		d.Explanation = "This returns the source expressions: " + d.Expression + "."
 		if s, ok := n.(*ast.ReturnStmt); ok && len(s.Results) == 0 {
 			d.Explanation = "This returns the current named results. Their values are not inferred."
 		}
 	default:
 		d.Explanation = "This performs " + d.Expression + "."
-		switch n.(type) {
+
+		switch statement := n.(type) {
 		case *ast.DeferStmt:
+			x.describeCall(&d, statement.Call)
 			d.Role = "defer"
 			d.Explanation = "This registers a deferred call. Its execution path is not expanded."
 			d.Limitation = "Deferred execution and its effects are not expanded."
@@ -335,4 +369,41 @@ func (x *extractor) rangeBindings(loop *ast.RangeStmt) []Access {
 		}
 	}
 	return accesses
+}
+
+// describeCall retains the callable name and origin without parsing rendered expressions.
+func (x *extractor) describeCall(details *OperationFacts, call *ast.CallExpr) {
+	details.Call = x.callBoundary(call)
+
+	details.CallName = x.label(call.Fun)
+	if callee := x.callee(call.Fun); callee != nil {
+		switch callee.(type) {
+		case *types.Func:
+			details.CallKind = "function"
+		case *types.Builtin:
+			details.CallKind = "builtin"
+		case *types.TypeName:
+			details.CallKind = "conversion"
+		}
+
+		if function, ok := callee.(*types.Func); ok {
+			if signature, ok := function.Type().(*types.Signature); ok && signature.Recv() != nil {
+				details.CallKind = "method"
+				receiver := types.TypeString(signature.Recv().Type(), func(p *types.Package) string {
+					if p.Path() == x.pkg.PkgPath {
+						return ""
+					}
+
+					return p.Name()
+				})
+				details.CallName = strings.TrimPrefix(receiver, "*") + "." + function.Name()
+			}
+		}
+
+		if callee.Pkg() == nil {
+			details.CallOrigin = "builtin"
+		} else {
+			details.CallOrigin = x.origins[callee.Pkg().Path()]
+		}
+	}
 }

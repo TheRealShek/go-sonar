@@ -13,10 +13,33 @@ export async function calculateLayout(
         width: node.width,
         height: node.height,
         children: [],
+        ports: node.parentId
+          ? [
+              {
+                id: `${node.id}:in`,
+                width: 0,
+                height: 0,
+                layoutOptions: { 'elk.port.side': 'NORTH' },
+              },
+              {
+                id: `${node.id}:out`,
+                width: 0,
+                height: 0,
+                layoutOptions: { 'elk.port.side': 'SOUTH' },
+              },
+              {
+                id: `${node.id}:right`,
+                width: 0,
+                height: 0,
+                layoutOptions: { 'elk.port.side': 'EAST' },
+              },
+            ]
+          : undefined,
         layoutOptions: {
-          'elk.padding': '[top=110,left=30,bottom=30,right=30]',
+          'elk.portConstraints': 'FIXED_SIDE',
+          'elk.padding': '[top=70,left=48,bottom=30,right=30]',
           'elk.direction': 'DOWN',
-          'elk.layered.spacing.nodeNodeBetweenLayers': '65',
+          'elk.layered.spacing.nodeNodeBetweenLayers': '35',
         },
       },
     ]),
@@ -39,7 +62,13 @@ export async function calculateLayout(
       'elk.layered.nodePlacement.strategy': request.nodes.some((node) => node.parentId)
         ? 'BRANDES_KOEPF'
         : 'SIMPLE',
-      'elk.direction': 'RIGHT',
+      'elk.direction':
+        request.nodes.some((node) => node.parentId) &&
+        request.nodes
+          .filter((node) => !node.parentId)
+          .every((parent) => request.nodes.some((node) => node.parentId === parent.id))
+          ? 'DOWN'
+          : 'RIGHT',
       'elk.edgeRouting': 'ORTHOGONAL',
       'elk.spacing.edgeEdge': '16',
       'elk.spacing.edgeNode': '20',
@@ -52,29 +81,38 @@ export async function calculateLayout(
       'elk.layered.spacing.nodeNodeBetweenLayers': '80',
     },
     children,
-    edges: request.edges.map((edge) => ({
-      id: edge.id,
-      sources: [edge.source],
-      targets: [edge.target],
-      labels:
-        edge.kind === 'control' && edge.label
-          ? [
-              {
-                id: `${edge.id}-label`,
-                text: edge.label,
-                width: edge.label.length * 7 + 12,
-                height: 20,
-              },
-            ]
-          : [],
-      layoutOptions: {
-        'elk.layered.priority.direction': edge.loopBack
-          ? '0'
-          : edge.kind === 'control'
-            ? '10'
-            : '1',
-      },
-    })),
+    edges: request.edges.map((edge) => {
+      const source = request.nodes.find((node) => node.id === edge.source);
+      const target = request.nodes.find((node) => node.id === edge.target);
+      const right =
+        edge.kind !== 'control' ||
+        (source?.errorDecision
+          ? edge.label === 'true'
+          : ['false', 'done'].includes(edge.label ?? ''));
+      return {
+        id: edge.id,
+        sources: [source?.parentId ? `${edge.source}:${right ? 'right' : 'out'}` : edge.source],
+        targets: [target?.parentId ? `${edge.target}:in` : edge.target],
+        labels:
+          edge.kind === 'control' && edge.label
+            ? [
+                {
+                  id: `${edge.id}-label`,
+                  text: edge.label,
+                  width: edge.label.length * 7 + 12,
+                  height: 20,
+                },
+              ]
+            : [],
+        layoutOptions: {
+          'elk.layered.priority.direction': edge.loopBack
+            ? '0'
+            : edge.kind === 'control'
+              ? '10'
+              : '1',
+        },
+      };
+    }),
   });
   const positions: LayoutResult['positions'] = {};
   const sizes: LayoutResult['sizes'] = {};
@@ -119,7 +157,7 @@ export async function calculateLayout(
       const size = sizes[node.id];
       if (parentId) {
         candidate.x = Math.max(node.position ? 0 : 30, candidate.x);
-        candidate.y = Math.max(node.position ? 0 : 110, candidate.y);
+        candidate.y = Math.max(node.position ? 0 : 70, candidate.y);
       }
       // Every move passes a colliding sibling, so this loop is bounded by the placed nodes.
       for (let attempt = 0; attempt < placed.length; attempt++) {

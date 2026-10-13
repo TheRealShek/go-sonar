@@ -61,6 +61,8 @@ export interface NavigationFrame {
   >;
 }
 export interface CallFrame extends NavigationFrame {
+  callerView?: GraphView;
+  callerDetailLevel?: 1 | 2 | 3;
   callId: string;
   expression: string;
   sourceLine: number;

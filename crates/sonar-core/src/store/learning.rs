@@ -340,7 +340,7 @@ impl GraphStore {
         let mut projection: HashMap<String, String> =
             nodes.keys().map(|id| (id.clone(), id.clone())).collect();
         let mut region_members: HashMap<String, Vec<String>> = HashMap::new();
-        if behavior.nodes.len() > 24 {
+        if behavior.nodes.len() >= 12 {
             let mut claimed = HashSet::new();
             let mut ordered: Vec<_> = behavior.nodes.iter().collect();
             ordered.sort_by_key(|n| (n.source.line, n.source.column, n.id.as_str()));
@@ -385,17 +385,31 @@ impl GraphStore {
                 let expanded = if let Some(anchor) = request.behavior_anchors.get(&parent.id) {
                     chain.contains(anchor)
                 } else {
-                    request
-                        .regions
-                        .iter()
-                        .rev()
-                        .find(|id| id.starts_with(&format!("{}/behavior/", parent.id)))
-                        .is_some_and(|id| id == &region_id)
+                    request.regions.contains(&region_id)
                 };
                 for id in &chain {
                     claimed.insert(id.clone());
                     if !expanded {
                         projection.insert(id.clone(), region_id.clone());
+                    }
+                }
+                if expanded {
+                    let group = crate::SourceGroup {
+                        id: region_id.clone(),
+                        name: "Source group".into(),
+                        first_line: start.source.line,
+                        end_line: chain
+                            .iter()
+                            .map(|id| facts[id.as_str()].source.end_line)
+                            .max()
+                            .unwrap_or(start.source.end_line),
+                    };
+                    for id in &chain {
+                        if let Some(details) =
+                            nodes.get_mut(id).and_then(|node| node.details.as_mut())
+                        {
+                            details.source_group = Some(group.clone());
+                        }
                     }
                 }
                 region_members.insert(region_id.clone(), chain);
@@ -626,6 +640,7 @@ pub(super) fn behavior_node(parent: &ViewNode, node: &BehaviorNode) -> ViewNode 
         qualified_name: parent.qualified_name.clone(),
         kind: node.kind.clone(),
         package_id: parent.package_id.clone(),
+        origin: parent.origin.clone(),
         source: node.source.clone(),
         signature: String::new(),
         documentation: node

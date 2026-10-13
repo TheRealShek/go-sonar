@@ -12,6 +12,7 @@ export interface SymbolFact {
   qualifiedName: string;
   kind: string;
   packageId: string;
+  origin?: 'project' | 'stdlib' | 'dependency' | 'builtin' | '';
   source: SourceSpan;
   signature: string;
   documentation: string;
@@ -172,6 +173,10 @@ export interface NeighborGroup extends NeighborFilter {
 
 export interface OperationFacts {
   role: string;
+  callName?: string;
+  callKind?: string;
+  callOrigin?: SymbolFact['origin'];
+  errorReturn?: string;
   expression: string;
   explanation: string;
   limitation?: string;
@@ -179,6 +184,7 @@ export interface OperationFacts {
   accesses?: Access[];
   region?: { firstNodeId: string; nodeCount: number; calls: number; operations: number };
   join?: boolean;
+  sourceGroup?: { id: string; name: string; firstLine: number; endLine: number };
 }
 
 export interface CallBoundary {

@@ -9,6 +9,7 @@ export interface LayoutNode {
   height: number;
   parentId?: string;
   role?: string;
+  errorDecision?: boolean;
   position?: Point;
 }
 

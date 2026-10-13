@@ -20,6 +20,8 @@ pub struct Symbol {
     pub qualified_name: String,
     pub kind: String,
     pub package_id: String,
+    #[serde(default)]
+    pub origin: String,
     pub source: SourceSpan,
     pub signature: String,
     pub documentation: String,
@@ -235,6 +237,8 @@ pub struct ViewNode {
     pub qualified_name: String,
     pub kind: String,
     pub package_id: String,
+    #[serde(default)]
+    pub origin: String,
     pub source: SourceSpan,
     pub signature: String,
     pub documentation: String,
@@ -254,6 +258,7 @@ impl From<Symbol> for ViewNode {
             qualified_name: symbol.qualified_name,
             kind: symbol.kind,
             package_id: symbol.package_id,
+            origin: symbol.origin,
             source: symbol.source,
             signature: symbol.signature,
             documentation: symbol.documentation,
@@ -377,6 +382,14 @@ pub struct NeighborGroup {
 #[serde(rename_all = "camelCase")]
 pub struct OperationFacts {
     pub role: String,
+    #[serde(default)]
+    pub call_name: String,
+    #[serde(default)]
+    pub call_kind: String,
+    #[serde(default)]
+    pub call_origin: String,
+    #[serde(default)]
+    pub error_return: String,
     pub expression: String,
     pub explanation: String,
     #[serde(default)]
@@ -389,6 +402,18 @@ pub struct OperationFacts {
     pub region: Option<Region>,
     #[serde(default)]
     pub join: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_group: Option<SourceGroup>,
+}
+
+/// A disclosed straight-line region, independent of callable identity.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceGroup {
+    pub id: String,
+    pub name: String,
+    pub first_line: u32,
+    pub end_line: u32,
 }
 
 /// Type-resolved arguments and syntactic result destinations, not value dependence.

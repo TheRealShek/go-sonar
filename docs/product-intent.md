@@ -44,7 +44,7 @@ Explanations use source facts and documented purpose. Comments must remain disti
 
 Expansion reveals one chosen branch or region rather than every reachable declaration. Multiple branches can remain open, share a helper, and show cycles without duplicating identities indefinitely.
 
-Function internals start collapsed and remain grouped when opened. Users need to follow a call, return to its exact occurrence, inspect another branch, and collapse detail without losing their place. Loops, recursion, early returns, deferred work, and unsupported continuations must not look like one guaranteed linear execution.
+The [approved minimal UI](ui-design.md) opens readable function flow when available. Small functions start expanded within the view budget; larger functions use counted region pills. Expanded regions use brackets instead of enclosing cards. Users need to follow a call, return to its exact occurrence, inspect another branch, and collapse detail without losing their place. Loops, recursion, early returns, deferred work, and unsupported continuations must not look like one guaranteed linear execution.
 
 Filters, collapsed groups, pagination, view limits, and incomplete analysis must explain omissions. A small graph must not imply that no other relationships exist. Layout can change geometry without changing source meaning.
 

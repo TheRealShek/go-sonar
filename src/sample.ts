@@ -28,6 +28,7 @@ const node = (
   kind,
   qualifiedName: `catalog.${name}`,
   packageId: 'sample/catalog',
+  origin: 'project',
   source: source(line),
   signature: kind === 'function' ? `func ${name}(key string) (Item, error)` : name,
   documentation: '',

@@ -17,6 +17,7 @@ type Symbol struct {
 	QualifiedName string `json:"qualifiedName"`
 	Kind          string `json:"kind"`
 	PackageID     string `json:"packageId"`
+	Origin        string `json:"origin"`
 	Source        Span   `json:"source"`
 	Signature     string `json:"signature"`
 	Documentation string `json:"documentation"`
@@ -105,6 +106,10 @@ type Batch struct {
 // OperationFacts explains source syntax without claiming value dependence.
 type OperationFacts struct {
 	Role        string        `json:"role"`
+	CallKind    string        `json:"callKind,omitempty"`
+	CallName    string        `json:"callName,omitempty"`
+	CallOrigin  string        `json:"callOrigin,omitempty"`
+	ErrorReturn string        `json:"errorReturn,omitempty"`
 	Expression  string        `json:"expression"`
 	Explanation string        `json:"explanation"`
 	Limitation  string        `json:"limitation,omitempty"`

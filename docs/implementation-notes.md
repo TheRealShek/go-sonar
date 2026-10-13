@@ -56,6 +56,10 @@ Native WebKit can suspend animation frames on an inactive workspace. Background 
 
 The Linux benchmark sampler measures simultaneous process-tree PSS, including Go tooling and WebKit. Its 25 ms interval can miss short peaks. Initial indexing retains existing Go and OS caches. Production workloads and numerical release budgets remain to be established.
 
+## Presentation redesign
+
+The [approved minimal UI](ui-design.md) replaces earlier node-card, toolbar, legend, minimap, and square Flow-route proposals. Its screenshots are prototypes. The documentation checkpoint preceded implementation. Local implementation and native check results are recorded in [Validation](validation.md), with prototype and real rendering evidence kept separate. Existing analysis limitations and bounds continue to apply.
+
 ## Remaining work
 
 Automatic file watching, workspace-root loading, test-package analysis, configurable build tags, external editor navigation, deeper value and alias analysis, and complete dynamic or concurrent execution coverage remain unfinished.
