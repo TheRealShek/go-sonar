@@ -1,6 +1,6 @@
 # Minimal function exploration
 
-Status: approved design with a local implementation. The documentation checkpoint preceded code changes; implementation results are recorded in [Validation](validation.md). Screenshots below remain source-informed prototypes, not captures of the desktop app.
+Status: approved design with an implementation. The documentation checkpoint preceded code changes; implementation results are recorded in [Validation](validation.md). Screenshots below remain source-informed prototypes, not captures of the desktop app.
 
 This specification replaces earlier presentation proposals for dense toolbars, repeated node metadata, square Flow routes, permanent legends, and automatic minimaps. Analysis scope, identities, security checks, and query bounds remain defined by the existing contracts.
 

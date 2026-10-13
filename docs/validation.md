@@ -177,7 +177,7 @@ The documentation checkpoint also passed a separate read-only backend baseline a
 
 ## Minimal UI implementation, 2026-10-13
 
-The local implementation adds compact names, signatures and packages, three detail levels, reliable origin and callable-kind metadata, defer registration markers, typed error-return pills, source-group brackets, rounded Flow routes, and an immediate saved-caller pane. More and Follow a path retain the less frequent controls. The minimap, New badges, repeated node package rows, call ribbons, permanent graph legend, and duplicate context rows were removed.
+The implementation adds compact names, signatures and packages, three detail levels, reliable origin and callable-kind metadata, defer registration markers, typed error-return pills, source-group brackets, rounded Flow routes, and an immediate saved-caller pane. More and Follow a path retain the less frequent controls. The minimap, New badges, repeated node package rows, call ribbons, permanent graph legend, and duplicate context rows were removed.
 
 The three images below are Chromium captures of the compiled frontend using the real Go analyzer and Rust backend through a temporary local transport bridge against read-only llmgate. They are implementation evidence, distinct from the approved prototypes.
 
@@ -197,3 +197,7 @@ Passed:
 - Separate standards and specification reviews, followed by fixes and affected-code rechecks. Keyboard activation, caller hover transfer, occurrence context, origin consistency, density anchoring, and disclosure counts were corrected.
 
 T3 browser snapshots timed out twice with `Preview automation snapshot timed out after 15000ms`; browser acceptance used local Chromium. Kache was unavailable, so Rust checks did not rely on that cache. Native foreground presentation, numerical performance budgets, and learner usability remain unestablished. Preserved landmarks and dragging can still invalidate calculated routes and require rounded fallbacks, which do not guarantee obstacle avoidance.
+
+### Pull request comparison
+
+The [before screenshot](screenshots/minimal-ui/function-flow-before.png) uses the exact main-branch frontend, Go analyzer, and Rust backend in an isolated checkout. It matches the implemented [after screenshot](screenshots/minimal-ui/function-flow.png): llmgate `backendHandler`, Flow view, a closed inspector, and a 1440 × 900 viewport. The old default Flow framing places most of the function below the viewport; the redesigned framing starts at its entry. All 28 llmgate hashes and Git status remained unchanged during the comparison capture.
